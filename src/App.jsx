@@ -354,11 +354,10 @@ export default function App(){
   return(
     <div style={{minHeight:"100vh",background:C.bg,display:"flex",fontFamily:"Inter,system-ui,sans-serif"}}>
       <style>{CSS}</style>
-      <Sidebar session={session} onLogout={()=>setSession(null)}/>
       <MainArea session={session} desigs={desigs} saveD={saveD} emps={emps} saveE={saveE}
         revs={revs} saveRevs={saveRevs} reviewers={reviewers} saveRvrs={saveRvrs}
         assign={assign} saveAssign={saveAssign} creds={creds} saveCreds={saveCreds}
-        myAssigned={myAssigned} toast={toast}/>
+        myAssigned={myAssigned} toast={toast} onLogout={()=>setSession(null)}/>
       <Toast toasts={toasts}/>
     </div>
   );
@@ -425,7 +424,7 @@ function SidebarSection({session,links,active,onSet}){
 }
 
 // Keep MainArea aware of active tab via prop-drilling through Sidebar — we'll lift tab state
-function MainArea({session,desigs,saveD,emps,saveE,revs,saveRevs,reviewers,saveRvrs,assign,saveAssign,creds,saveCreds,myAssigned,toast}){
+function MainArea({session,desigs,saveD,emps,saveE,revs,saveRevs,reviewers,saveRvrs,assign,saveAssign,creds,saveCreds,myAssigned,toast,onLogout}){
   const [tab,setTab]=useState(session.role==="admin"?"dash":"myrevs");
   
   // Override sidebar — render custom sidebar with setTab
@@ -442,7 +441,7 @@ function MainArea({session,desigs,saveD,emps,saveE,revs,saveRevs,reviewers,saveR
       </header>
       <div style={{display:"flex",flex:1,minHeight:0}}>
         {/* Sidebar nav only (no logo/user, that's in the outer Sidebar) */}
-        <SidebarNav session={session} tab={tab} setTab={setTab}/>
+        <SidebarNav session={session} tab={tab} setTab={setTab} onLogout={onLogout}/>
         {/* Content */}
         <main style={{flex:1,padding:"28px",overflowY:"auto",minWidth:0}}>
           {session.role==="admin"&&(
@@ -469,7 +468,7 @@ function MainArea({session,desigs,saveD,emps,saveE,revs,saveRevs,reviewers,saveR
 
 const TAB_LABELS={dash:"Dashboard",emps:"Employees",rvrs:"Reviewers & Assignments",desigs:"Designations & KPIs",reports:"Reports",security:"Security",myrevs:"My Evaluations",done:"Completed Reviews"};
 
-function SidebarNav({session,tab,setTab}){
+function SidebarNav({session,tab,setTab,onLogout}){
   const adminLinks=[
     {id:"dash",   n:"dash",   lb:"Dashboard"},
     {id:"emps",   n:"users",  lb:"Employees"},
@@ -505,7 +504,7 @@ function SidebarNav({session,tab,setTab}){
       })}
       {/* Logout at bottom */}
       <div style={{flex:1}}/>
-      <button onClick={()=>{lsSet("cbpms-session",null);window.location.reload();}}
+      <button onClick={onLogout}
         style={{display:"flex",alignItems:"center",gap:9,padding:"9px 12px",borderRadius:8,border:`1px solid ${C.border}`,background:"transparent",color:C.text4,fontSize:13,fontWeight:400,cursor:"pointer",fontFamily:"Inter,sans-serif",marginTop:8}}>
         <Ic n="logout" sz={14} c={C.text4}/>Sign Out
       </button>
