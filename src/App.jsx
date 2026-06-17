@@ -534,16 +534,16 @@ function LoginPage({creds,reviewers,onLogin}){
         <div style={{position:"absolute",top:"-20%",right:"-10%",width:400,height:400,background:"rgba(29,185,84,0.08)",borderRadius:"50%"}}/>
         <div style={{position:"absolute",bottom:"-10%",left:"-10%",width:300,height:300,background:"rgba(29,185,84,0.06)",borderRadius:"50%"}}/>
         <div style={{position:"relative",zIndex:1,textAlign:"center"}}>
-          <div style={{background:"rgba(255,255,255,0.08)",borderRadius:16,padding:"18px 28px",display:"inline-block",marginBottom:28,backdropFilter:"blur(10px)"}}>
-            <img src={LOGO} alt="Clustox" style={{height:48,display:"block",filter:"brightness(0) invert(1)"}}/>
+          <div style={{background:"rgba(255,255,255,0.96)",borderRadius:16,padding:"22px 40px",display:"inline-block",marginBottom:32,boxShadow:"0 8px 32px rgba(0,0,0,0.25)"}}>
+            <img src={LOGO} alt="Clustox" style={{height:54,display:"block"}}/>
           </div>
-          <h1 style={{color:"#fff",fontSize:22,fontWeight:700,lineHeight:1.4,marginBottom:12}}>Competency Based<br/>Performance Management</h1>
+          <h1 style={{color:"#fff",fontSize:24,fontWeight:700,lineHeight:1.4,marginBottom:12}}>Competency Based<br/>Performance Management</h1>
           <p style={{color:"rgba(255,255,255,0.6)",fontSize:14,lineHeight:1.6,maxWidth:280}}>Standardized, data-driven performance evaluations for engineering teams.</p>
-          <div style={{marginTop:36,display:"flex",flexDirection:"column",gap:12}}>
-            {[["🎯","Weighted KPI scoring across designations"],["📊","Multi-reviewer workflow management"],["🔗","Private employee result sharing"]].map(([ic,tx])=>(
-              <div key={tx} style={{display:"flex",alignItems:"center",gap:12,background:"rgba(255,255,255,0.06)",borderRadius:10,padding:"10px 16px",backdropFilter:"blur(6px)"}}>
-                <span style={{fontSize:18}}>{ic}</span>
-                <span style={{color:"rgba(255,255,255,0.75)",fontSize:13}}>{tx}</span>
+          <div style={{marginTop:36,display:"flex",flexDirection:"column",gap:10}}>
+            {["Weighted KPI scoring across designations","Multi-reviewer workflow management","Private employee result sharing"].map(tx=>(
+              <div key={tx} style={{display:"flex",alignItems:"center",gap:12,background:"rgba(255,255,255,0.06)",borderRadius:10,padding:"11px 18px"}}>
+                <div style={{width:7,height:7,borderRadius:"50%",background:"#1DB954",flexShrink:0}}/>
+                <span style={{color:"rgba(255,255,255,0.8)",fontSize:13}}>{tx}</span>
               </div>
             ))}
           </div>
