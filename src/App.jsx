@@ -1000,7 +1000,7 @@ function DesigMgr({desigs,saveD,toast}){
   const saveB=()=>{if(!bf.name.trim()){toast("Name required.","error");return;}bModal==="add"?upd({behaviors:[...(dsg.behaviors||[]),{id:uid(),...bf}]}):upd({behaviors:dsg.behaviors.map(b=>b.id===bModal?{...b,...bf}:b)});toast(bModal==="add"?"Added.":"Updated.");setBModal(null);setBf({name:"",desc:"",question:""});};
 
   return(<div>
-    <PageHeader icon="tag" title="Designations & KPIs" sub="Define job levels, scoring criteria, and behavior gates"/>
+    <PageHeader icon="tag" title="Designations & KPIs" sub="Define job levels, scoring criteria, and professional standards"/>
     <div style={{display:"grid",gridTemplateColumns:"240px 1fr",gap:20,alignItems:"start"}}>
       <Card style={{padding:16}}>
         <div style={{fontWeight:600,fontSize:13,color:C.text,marginBottom:12}}>Designations</div>
@@ -1026,7 +1026,7 @@ function DesigMgr({desigs,saveD,toast}){
         )}
       </Card>
 
-      {!dsg?<Card><Empty icon="tag" title="Select a designation" sub="Click a designation on the left to view and manage its KPIs and behavior gates."/></Card>:
+      {!dsg?<Card><Empty icon="tag" title="Select a designation" sub="Click a designation on the left to view and manage its KPIs and professional standards."/></Card>:
         <div>
           <Card style={{marginBottom:16}}>
             <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,marginBottom:16}}>
@@ -1072,10 +1072,10 @@ function DesigMgr({desigs,saveD,toast}){
 
           <Card>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
-              <div style={{fontWeight:600,fontSize:14,color:C.text,display:"flex",alignItems:"center",gap:8}}><Ic n="shield" sz={15} c={C.purple}/>Behavior Gates <span style={{background:C.purpleL,color:C.purple,borderRadius:20,padding:"2px 8px",fontSize:11,fontWeight:600,marginLeft:4}}>{(dsg.behaviors||[]).length}</span></div>
-              <Btn variant="secondary" size="sm" icon="plus" onClick={()=>{setBf({name:"",desc:"",question:""});setBModal("add");}}>Add Behavior</Btn>
+              <div style={{fontWeight:600,fontSize:14,color:C.text,display:"flex",alignItems:"center",gap:8}}><Ic n="shield" sz={15} c={C.purple}/>Professional Standards <span style={{background:C.purpleL,color:C.purple,borderRadius:20,padding:"2px 8px",fontSize:11,fontWeight:600,marginLeft:4}}>{(dsg.behaviors||[]).length}</span></div>
+              <Btn variant="secondary" size="sm" icon="plus" onClick={()=>{setBf({name:"",desc:"",question:""});setBModal("add");}}>Add Standard</Btn>
             </div>
-            {(dsg.behaviors||[]).length===0?<div style={{color:C.text4,fontSize:13,padding:"12px 0"}}>No behavior gates yet.</div>:
+            {(dsg.behaviors||[]).length===0?<div style={{color:C.text4,fontSize:13,padding:"12px 0"}}>No professional standards yet.</div>:
               <div style={{display:"flex",flexDirection:"column",gap:0}}>
                 {(dsg.behaviors||[]).map((b,i)=>(
                   <div key={b.id} style={{display:"flex",gap:12,padding:"12px 0",borderBottom:i<(dsg.behaviors||[]).length-1?`1px solid ${C.border}`:"none",alignItems:"start"}}>
@@ -1105,13 +1105,13 @@ function DesigMgr({desigs,saveD,toast}){
       </div>
       <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}><Btn variant="secondary" onClick={()=>setKModal(null)}>Cancel</Btn><Btn onClick={saveK}>{kModal==="add"?"Add KPI":"Update KPI"}</Btn></div>
     </Modal>)}
-    {bModal&&(<Modal title={bModal==="add"?"Add Behavior Gate":"Edit Behavior Gate"} onClose={()=>setBModal(null)} width={480}>
+    {bModal&&(<Modal title={bModal==="add"?"Add Professional Standard":"Edit Professional Standard"} onClose={()=>setBModal(null)} width={480}>
       <div style={{display:"flex",flexDirection:"column",gap:14,marginBottom:20}}>
         <Fld label="Name" required><input value={bf.name} onChange={e=>setBf(p=>({...p,name:e.target.value}))} placeholder="e.g. Leadership Behavior"/></Fld>
         <Fld label="Description"><textarea value={bf.desc} onChange={e=>setBf(p=>({...p,desc:e.target.value}))} rows={2} placeholder="What does this behavior entail?"/></Fld>
         <Fld label="Manager Question"><input value={bf.question} onChange={e=>setBf(p=>({...p,question:e.target.value}))} placeholder="e.g. Does this person elevate those around them?"/></Fld>
       </div>
-      <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}><Btn variant="secondary" onClick={()=>setBModal(null)}>Cancel</Btn><Btn onClick={saveB}>{bModal==="add"?"Add Behavior":"Update Behavior"}</Btn></div>
+      <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}><Btn variant="secondary" onClick={()=>setBModal(null)}>Cancel</Btn><Btn onClick={saveB}>{bModal==="add"?"Add Standard":"Update Standard"}</Btn></div>
     </Modal>)}
   </div>);
 }
@@ -1180,7 +1180,7 @@ function ReviewerView({session,desigs,emps,revs,saveRevs,assign,toast}){
       <div style={{display:"inline-block",background:rc.bg,border:`1px solid ${rc.color}30`,borderRadius:10,padding:"12px 20px",marginBottom:20}}>
         <div style={{fontSize:24,marginBottom:4}}>{rc.icon}</div>
         <div style={{color:rc.color,fontWeight:700,fontSize:18}}>{rc.label}</div>
-        <div style={{color:C.text4,fontSize:12,marginTop:4}}>Score: {sc.toFixed(2)} · Gate: {gt}</div>
+        <div style={{color:C.text4,fontSize:12,marginTop:4}}>Score: {sc.toFixed(2)} · Standard: {gt==="meets"?"Meets Expectations":gt==="watch"?"Improvement Required":gt==="critical"?"Unsatisfactory":gt}</div>
       </div>
       <br/>
       <Btn icon="plus" onClick={reset} variant="secondary">Evaluate Another Employee</Btn>
@@ -1232,7 +1232,7 @@ function ReviewerView({session,desigs,emps,revs,saveRevs,assign,toast}){
             <div style={{fontSize:12,color:C.text3,fontStyle:"italic",marginBottom:10}}>{dsg.identity}</div>
             <div style={{display:"flex",gap:8}}>
               <span style={{background:C.greenL,color:C.green,borderRadius:6,padding:"3px 10px",fontSize:11,fontWeight:600}}>{kpis.length} KPIs</span>
-              <span style={{background:C.purpleL,color:C.purple,borderRadius:6,padding:"3px 10px",fontSize:11,fontWeight:600}}>{bl.length} Behavior Gates</span>
+              <span style={{background:C.purpleL,color:C.purple,borderRadius:6,padding:"3px 10px",fontSize:11,fontWeight:600}}>{bl.length} Professional Standards</span>
             </div>
           </div>
         )}
@@ -1281,13 +1281,13 @@ function ReviewerView({session,desigs,emps,revs,saveRevs,assign,toast}){
       </Card>
 
       <Card style={{marginBottom:16}}>
-        <div style={{fontWeight:600,fontSize:14,color:C.text,marginBottom:20,display:"flex",alignItems:"center",gap:8}}><Ic n="shield" sz={15} c={C.purple}/>Behavior Gates — Non-weighted qualitative assessment</div>
+        <div style={{fontWeight:600,fontSize:14,color:C.text,marginBottom:20,display:"flex",alignItems:"center",gap:8}}><Ic n="shield" sz={15} c={C.purple}/>Professional Standards — Non-weighted qualitative assessment</div>
         {bl.map((b,i)=>{const sl=beh[i]||"";return(
           <div key={b.id} style={{borderBottom:`1px solid ${C.border}`,paddingBottom:14,marginBottom:14}}>
             <div style={{display:"flex",gap:16,alignItems:"start",flexWrap:"wrap"}}>
               <div style={{flex:1}}><div style={{fontWeight:600,fontSize:13,color:C.text,marginBottom:3}}>{b.name}</div><div style={{fontSize:12,color:C.text3,lineHeight:1.5}}>{b.desc}</div></div>
               <div style={{display:"flex",gap:6,flexShrink:0}}>
-                {[["meets","Meets",C.green],["watch","Watch",C.amber],["critical","Critical",C.red]].map(([v,lb,col])=>(
+                {[["meets","Meets Expectations",C.green],["watch","Improvement Required",C.amber],["critical","Unsatisfactory",C.red]].map(([v,lb,col])=>(
                   <button key={v} onClick={()=>setBeh(bv=>({...bv,[i]:v}))}
                     style={{padding:"7px 14px",borderRadius:8,border:`2px solid ${sl===v?col:C.border}`,background:sl===v?col+"15":C.white,color:sl===v?col:C.text3,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"Inter,sans-serif",transition:"all 0.15s"}}>
                     {lb}
@@ -1322,7 +1322,7 @@ function ReviewerView({session,desigs,emps,revs,saveRevs,assign,toast}){
         <div style={{fontSize:28}}>{rc.icon}</div>
         <div style={{flex:1}}>
           <div style={{fontWeight:700,fontSize:16,color:rc.color}}>{rc.label}</div>
-          <div style={{fontSize:12,color:C.text4,marginTop:2}}>Score: {sc.toFixed(2)} · Gate: {gt==="unset"?"Not all rated":gt}</div>
+          <div style={{fontSize:12,color:C.text4,marginTop:2}}>Score: {sc.toFixed(2)} · Standard: {gt==="unset"?"Not all rated":gt==="meets"?"Meets Expectations":gt==="watch"?"Improvement Required":gt==="critical"?"Unsatisfactory":gt}</div>
         </div>
         <div style={{display:"flex",gap:12}}>
           <Btn variant="secondary" onClick={()=>setStep(0)}><Ic n="left" sz={13} c={C.text3}/>Back</Btn>
@@ -1373,7 +1373,7 @@ function ReportsView({revs,emps,desigs,saveRevs,toast}){
 
   const cpL=r=>{const l=`${window.location.origin}${window.location.pathname}?view=${r.token}`;navigator.clipboard.writeText(l);setCpd(r.id);setTimeout(()=>setCpd(null),2200);toast("Employee link copied!");};
   const exportCSV=()=>{
-    const h=["Employee","Designation","Department","Cycle","Reviewer","Job Score","Behavior Gate","Recommendation","Promotion","Submitted"].join(",");
+    const h=["Employee","Designation","Department","Cycle","Reviewer","Job Score","Professional Standard","Recommendation","Promotion","Submitted"].join(",");
     const rows=fil.map(r=>[`"${r.empName}"`,`"${r.designationName}"`,`"${r.department||""}"`,`"${r.cycle}"`,`"${r.reviewerName}"`,r.jobScore.toFixed(2),r.behaviorGate,`"${r.recommendation}"`,`"${r.promotion||""}"`,new Date(r.submittedAt).toLocaleDateString()].join(","));
     const blob=new Blob([[h,...rows].join("\n")],{type:"text/csv"});
     const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="clustox_cbpms_report.csv";a.click();toast("CSV exported.");
@@ -1431,7 +1431,7 @@ function ReportsView({revs,emps,desigs,saveRevs,toast}){
               <div style={{padding:"16px 18px 20px",background:C.bg,borderTop:`1px solid ${C.border}`}}>
                 <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
                   <RecBadge {...rc}/>
-                  <span style={{display:"inline-flex",alignItems:"center",gap:5,background:C.white,border:`1px solid ${C.border}`,borderRadius:8,padding:"5px 12px",fontSize:12,color:C.text3}}>Gate: {r.behaviorGate}</span>
+                  <span style={{display:"inline-flex",alignItems:"center",gap:5,background:C.white,border:`1px solid ${C.border}`,borderRadius:8,padding:"5px 12px",fontSize:12,color:C.text3}}>Standard: {r.behaviorGate==="meets"?"Meets Expectations":r.behaviorGate==="watch"?"Improvement Required":r.behaviorGate==="critical"?"Unsatisfactory":r.behaviorGate}</span>
                   {r.promotion&&<span style={{display:"inline-flex",alignItems:"center",gap:5,background:C.white,border:`1px solid ${C.border}`,borderRadius:8,padding:"5px 12px",fontSize:12,color:C.text3}}>Promotion: {r.promotion}</span>}
                   <span style={{display:"inline-flex",alignItems:"center",gap:5,background:C.white,border:`1px solid ${C.border}`,borderRadius:8,padding:"5px 12px",fontSize:12,color:C.text3}}>{new Date(r.submittedAt).toLocaleDateString()}</span>
                   {r.token&&<button onClick={()=>cpL(r)} style={{display:"inline-flex",alignItems:"center",gap:6,padding:"5px 12px",border:`1px solid ${cpd===r.id?C.green:C.teal}`,borderRadius:8,background:cpd===r.id?C.greenL:C.tealL,color:cpd===r.id?C.green:C.teal,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"Inter,sans-serif"}}><Ic n={cpd===r.id?"tick":"mail"} sz={12} c={cpd===r.id?C.green:C.teal}/>{cpd===r.id?"Copied!":"Copy Employee Link"}</button>}
@@ -1500,7 +1500,7 @@ function EmpResultPage({rev,desig}){
         <div className="g3" style={{marginBottom:24}}>
           {[
             {lb:"Job Score",val:rev.jobScore.toFixed(2),sub:RLABELS[Math.round(rev.jobScore)]||"",c:rev.jobScore>=4.5?C.green:rev.jobScore>=3?C.blue:C.red},
-            {lb:"Behavior Gate",val:rev.behaviorGate.charAt(0).toUpperCase()+rev.behaviorGate.slice(1),sub:rev.behaviorGate==="meets"?"No concerns":rev.behaviorGate==="watch"?"Coaching recommended":"Immediate attention",c:rev.behaviorGate==="critical"?C.red:rev.behaviorGate==="watch"?C.amber:C.green},
+            {lb:"Professional Standard",val:rev.behaviorGate==="meets"?"Meets Expectations":rev.behaviorGate==="watch"?"Improvement Required":rev.behaviorGate==="critical"?"Unsatisfactory":"Pending",sub:rev.behaviorGate==="meets"?"No concerns raised":rev.behaviorGate==="watch"?"Improvement required":"Unsatisfactory conduct",c:rev.behaviorGate==="critical"?C.red:rev.behaviorGate==="watch"?C.amber:C.green},
             {lb:"Review Date",val:new Date(rev.submittedAt).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"}),sub:`By ${rev.reviewerName}`,c:C.text3},
           ].map(b=>(
             <Card key={b.lb} style={{textAlign:"center",padding:"20px 16px"}}>
