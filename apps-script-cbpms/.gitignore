@@ -1,0 +1,4 @@
+# clasp — never commit these (they contain auth tokens / project ids)
+.clasp.json
+.clasprc.json
+node_modules/

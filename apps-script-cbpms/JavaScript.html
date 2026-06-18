@@ -1,0 +1,413 @@
+<script>
+// ─── google.script.run promise wrapper ───────────────────────────────────────
+function run(fn){
+  var args = [].slice.call(arguments,1);
+  return new Promise(function(res,rej){
+    google.script.run.withSuccessHandler(res).withFailureHandler(rej)[fn].apply(google.script.run,args);
+  });
+}
+// ─── tiny helpers ─────────────────────────────────────────────────────────────
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function $(sel){return document.querySelector(sel);}
+function initials(s){if(!s)return'?';var p=String(s).replace(/@.*/,'').split(/[ ._-]+/);return(p[0][0]+(p[1]?p[1][0]:'')).toUpperCase();}
+function avatar(name,size,color){size=size||36;color=color||'var(--green)';return '<div class="avatar" style="width:'+size+'px;height:'+size+'px;background:color-mix(in srgb,'+color+' 15%,#fff);border:1.5px solid color-mix(in srgb,'+color+' 35%,#fff);color:'+color+';font-size:'+(size*0.36)+'px">'+esc(initials(name))+'</div>';}
+var toastT;
+function toast(msg,type){var t=$('#toast');if(!t){t=document.createElement('div');t.id='toast';t.className='toast';document.body.appendChild(t);}t.textContent=msg;t.style.background=type==='error'?'var(--red)':'var(--green)';t.style.display='block';clearTimeout(toastT);toastT=setTimeout(function(){t.style.display='none';},3200);}
+
+// ─── scoring (mirrors server for live display; server is authoritative) ────────
+function calcScore(kpis,r){return kpis.reduce(function(s,k,i){return s+(Number(r[i])||0)*(Number(k.weight)/100);},0);}
+function calcGate(behaviors,b){var v=behaviors.map(function(_,i){return b[i]||'';});if(v.indexOf('critical')>=0)return'critical';if(v.indexOf('watch')>=0)return'watch';if(v.length&&v.every(function(x){return x==='meets';}))return'meets';return'unset';}
+function getRec(score,gate){
+  if(gate==='critical')return{label:'PIP / Immediate Action',color:'var(--red)',bg:'var(--redL)',icon:'🚨'};
+  if(gate==='watch')return{label:'Coaching Required',color:'var(--amber)',bg:'var(--amberL)',icon:'⚠️'};
+  if(score===0)return{label:'Not Rated',color:'var(--text4)',bg:'var(--bg)',icon:'⏳'};
+  if(score>=4.5)return{label:'Exceptional',color:'var(--green)',bg:'var(--greenL)',icon:'🏆'};
+  if(score>=3.75)return{label:'Exceeds Expectations',color:'var(--teal)',bg:'var(--tealL)',icon:'⭐'};
+  if(score>=3.0)return{label:'Meets Expectations',color:'var(--blue)',bg:'var(--blueL)',icon:'✅'};
+  return{label:'Improvement Plan',color:'var(--red)',bg:'var(--redL)',icon:'📋'};
+}
+var RLABELS=['','Unsatisfactory','Needs Improvement','Meets Expectations','Exceeds Expectations','Exceptional'];
+var RCOLORS=['','var(--red)','var(--amber)','#F59E0B','var(--teal)','var(--green)'];
+
+// ─── global state ─────────────────────────────────────────────────────────────
+var S={boot:null,tab:null,wiz:null,modal:null};
+function desigById(id){return (S.boot.designations||[]).filter(function(d){return d.id===id;})[0];}
+
+// ─── boot ─────────────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded',function(){
+  run('getBootstrap').then(function(b){
+    S.boot=b;
+    S.tab=b.isAdmin?'dash':(b.myEmployees.length||((b.myReviews||[]).length)?'eval':'none');
+    renderShell();
+  }).catch(function(e){
+    $('#root').className='center';
+    $('#root').innerHTML='<div style="max-width:440px;text-align:center"><div style="font-weight:700;font-size:16px;margin-bottom:8px">Couldn\'t load</div><div class="muted">'+esc(e.message||e)+'</div></div>';
+  });
+});
+
+// ─── shell + nav ──────────────────────────────────────────────────────────────
+function navFor(){
+  if(S.boot.isAdmin)return[['dash','Dashboard'],['emps','Employees'],['rvrs','Reviewers'],['desigs','Designations & KPIs'],['reports','Reports']];
+  var n=[];
+  if(S.boot.myEmployees.length)n.push(['eval','My Evaluations']);
+  if((S.boot.myReviews||[]).length||S.boot.myEmployees.length)n.push(['done','My Reviews']);
+  if(!n.length)n.push(['none','Home']);return n;
+}
+function renderShell(){
+  var u=S.boot.user, links=navFor();
+  var rc=S.boot.isAdmin?'var(--purple)':'var(--green)';
+  $('#root').className='';
+  $('#root').outerHTML='<div id="root"><div class="app">'+
+    '<aside class="sidebar">'+
+      '<div class="brand"><div class="logo">Clustox</div><div class="sub">CBPMS</div></div>'+
+      '<div class="userbox">'+avatar(u.email,30,rc)+'<div><div class="em">'+esc(u.email)+'</div><div class="rl" style="color:'+rc+'">'+esc(u.role)+'</div></div></div>'+
+      '<nav>'+links.map(function(l){return '<button class="navlink'+(S.tab===l[0]?' on':'')+'" onclick="go(\''+l[0]+'\')">'+esc(l[1])+'</button>';}).join('')+'</nav>'+
+    '</aside>'+
+    '<div class="main"><div class="topbar"><div style="font-weight:600;color:var(--text2)">'+esc(tabTitle())+'</div><div class="muted" style="font-size:12px">Clustox CBPMS · Secure</div></div>'+
+    '<div class="content" id="view"></div></div>'+
+  '</div></div>';
+  renderView();
+}
+function tabTitle(){var m={dash:'Dashboard',emps:'Employees',rvrs:'Reviewers & Assignments',desigs:'Designations & KPIs',reports:'Reports',eval:'My Evaluations',done:'My Reviews',none:'Home'};return m[S.tab]||'';}
+function go(t){S.tab=t;S.wiz=null;renderShell();}
+
+function renderView(){
+  var v=$('#view');
+  var f={dash:vDash,emps:vEmps,rvrs:vRvrs,desigs:vDesigs,reports:vReports,eval:vEval,done:vDone,none:vNone}[S.tab];
+  v.innerHTML=f?f():'';
+}
+function head(title,sub,action){return '<div class="page-head"><div><h2>'+esc(title)+'</h2>'+(sub?'<p>'+esc(sub)+'</p>':'')+'</div>'+(action||'')+'</div>';}
+function empty(t,s){return '<div class="card"><div class="empty"><div class="t">'+esc(t)+'</div><div>'+esc(s)+'</div></div></div>';}
+
+function vNone(){return head('Welcome','You\'re signed in')+'<div class="card"><div class="empty"><div class="t">Nothing assigned yet</div><div>An admin hasn\'t assigned any employees for you to review yet. You\'ll get an email when employees are assigned to you.</div></div></div>';}
+
+// ─── ADMIN: dashboard ─────────────────────────────────────────────────────────
+function vDash(){
+  var b=S.boot, emps=b.employees||[], revs=b.reviews||[], asg=b.assignments||[];
+  var submitted=revs.filter(function(r){return r.status==='submitted';});
+  var assignedIds={};asg.forEach(function(a){assignedIds[a.employeeId]=1;});
+  var assigned=emps.filter(function(e){return assignedIds[e.id];}).length;
+  var evaluated=emps.filter(function(e){return submitted.some(function(r){return r.empId===e.id;});}).length;
+  var risk=submitted.filter(function(r){return r.recommendation==='PIP / Immediate Action'||r.recommendation==='Improvement Plan';}).length;
+  var reviewers={};asg.forEach(function(a){reviewers[String(a.reviewerEmail).toLowerCase()]=1;});
+  var stats=[['Total Employees',emps.length,'👥','var(--blue)','var(--blueL)','emps'],
+    ['Evaluations Done',submitted.length,'✅','var(--green)','var(--greenL)','reports'],
+    ['Active Reviewers',Object.keys(reviewers).length,'🧭','var(--purple)','var(--purpleL)','rvrs'],
+    ['At Risk',risk,'⚠️','var(--red)','var(--redL)','reports']];
+  var html=head('Dashboard','Overview of your performance management cycle');
+  html+='<div class="grid4" style="margin-bottom:18px">'+stats.map(function(s){return '<button class="stat" onclick="go(\''+s[5]+'\')"><div class="ic" style="background:'+s[4]+'">'+s[2]+'</div><div class="v">'+s[1]+'</div><div class="l">'+s[0]+'</div></button>';}).join('')+'</div>';
+  // progress + distribution
+  html+='<div class="grid2"><div class="card"><div style="font-weight:600;margin-bottom:14px">📈 Evaluation Progress</div>'+
+    progLine('Employees evaluated',evaluated,emps.length,'var(--green)')+progLine('Employees assigned',assigned,emps.length,'var(--blue)')+'</div>';
+  html+='<div class="card"><div style="font-weight:600;margin-bottom:14px">🏆 Score Distribution</div>'+distHtml(submitted)+'</div></div>';
+  // recent
+  var recent=submitted.slice().sort(function(a,b){return b.submittedAt-a.submittedAt;}).slice(0,5);
+  if(recent.length){html+='<div class="card" style="margin-top:18px"><div style="font-weight:600;margin-bottom:8px">🕑 Recent Evaluations</div>'+recent.map(function(r){var rc=getRec(r.jobScore,r.behaviorGate);return '<div class="flex gap" style="padding:11px 0;border-bottom:1px solid var(--border)">'+avatar(r.empName,34)+'<div style="flex:1"><div style="font-weight:600;font-size:13px">'+esc(r.empName)+'</div><div class="muted" style="font-size:12px">'+esc(r.designationName)+' · '+esc(r.cycle)+'</div></div><div style="font-weight:700;color:'+rc.color+'">'+r.jobScore.toFixed(1)+'</div><span class="tag" style="background:'+rc.bg+';color:'+rc.color+'">'+rc.icon+' '+esc(rc.label)+'</span></div>';}).join('')+'</div>';}
+  return html;
+}
+function progLine(lb,v,max,c){var pct=max?Math.min(100,v/max*100):0;return '<div style="margin-bottom:12px"><div class="flex between" style="font-size:13px;margin-bottom:5px"><span class="muted">'+lb+'</span><span style="font-weight:600">'+v+' / '+max+'</span></div><div class="bar"><span style="width:'+pct+'%;background:'+c+'"></span></div></div>';}
+function distHtml(subs){
+  if(!subs.length)return '<div class="muted" style="text-align:center;padding:18px">No evaluations yet</div>';
+  var rows=[['🏆','Exceptional (≥4.5)',subs.filter(function(r){return r.jobScore>=4.5&&r.behaviorGate==='meets';}).length,'var(--green)'],
+    ['⭐','Exceeds (3.75–4.5)',subs.filter(function(r){return r.jobScore>=3.75&&r.jobScore<4.5;}).length,'var(--teal)'],
+    ['✅','Meets (3.0–3.75)',subs.filter(function(r){return r.jobScore>=3&&r.jobScore<3.75;}).length,'var(--blue)'],
+    ['📋','Improvement (<3.0)',subs.filter(function(r){return r.jobScore<3&&r.behaviorGate!=='critical';}).length,'var(--amber)'],
+    ['🚨','PIP',subs.filter(function(r){return r.behaviorGate==='critical';}).length,'var(--red)']];
+  return rows.filter(function(x){return x[2]>0;}).map(function(x){var pct=subs.length?x[2]/subs.length*100:0;return '<div class="flex gap" style="margin-bottom:8px"><span style="width:20px">'+x[0]+'</span><div style="flex:1"><div class="flex between" style="font-size:12px;margin-bottom:3px"><span class="muted">'+x[1]+'</span><span style="font-weight:600;color:'+x[3]+'">'+x[2]+'</span></div><div class="bar"><span style="width:'+pct+'%;background:'+x[3]+'"></span></div></div></div>';}).join('');
+}
+
+// ─── ADMIN: employees ─────────────────────────────────────────────────────────
+var empSearch='';
+function vEmps(){
+  var b=S.boot, emps=b.employees||[];
+  var q=empSearch.toLowerCase();
+  var filt=emps.filter(function(e){var dn=(desigById(e.designationId)||{}).name||'';return (e.name||'').toLowerCase().indexOf(q)>=0||dn.toLowerCase().indexOf(q)>=0||(e.department||'').toLowerCase().indexOf(q)>=0;});
+  var html=head('Employees',emps.length+' employees','<button class="btn" onclick="empModal()">＋ Add Employee</button>');
+  html+='<div class="card" style="margin-bottom:16px;padding:14px"><input placeholder="Search by name, designation, department…" value="'+esc(empSearch)+'" oninput="empSearch=this.value;rerenderEmps()"></div>';
+  if(!filt.length)return html+empty('No employees found',empSearch?'No matches.':'Add your first employee.');
+  html+='<table class="tbl"><thead><tr><th>Name</th><th>Designation</th><th>Department</th><th>Status</th><th></th></tr></thead><tbody>';
+  filt.forEach(function(e){
+    var dn=(desigById(e.designationId)||{}).name||'—';
+    var done=(b.reviews||[]).some(function(r){return r.empId===e.id&&r.status==='submitted';});
+    var asgd=(b.assignments||[]).some(function(a){return a.employeeId===e.id;});
+    var st=done?['Evaluated','var(--green)','var(--greenL)']:asgd?['Assigned','var(--blue)','var(--blueL)']:['Unassigned','var(--text4)','var(--bg)'];
+    html+='<tr><td><div class="flex gap">'+avatar(e.name,32)+'<div><div style="font-weight:600">'+esc(e.name)+'</div>'+(e.email?'<div class="muted" style="font-size:11px">'+esc(e.email)+'</div>':'')+'</div></div></td><td>'+esc(dn)+'</td><td>'+esc(e.department||'—')+'</td><td><span class="pill" style="background:'+st[2]+';color:'+st[1]+'">'+st[0]+'</span></td><td style="text-align:right;white-space:nowrap"><button class="btn sec sm" onclick="empModal(\''+e.id+'\')">Edit</button> <button class="btn danger sm" onclick="empDelete(\''+e.id+'\')">Delete</button></td></tr>';
+  });
+  return html+'</tbody></table>';
+}
+function rerenderEmps(){var v=$('#view');var pos=document.activeElement;var val=pos&&pos.value;v.innerHTML=vEmps();var inp=v.querySelector('input');if(inp){inp.focus();inp.value=val;inp.setSelectionRange(val.length,val.length);}}
+function empModal(id){
+  var e=id?(S.boot.employees||[]).filter(function(x){return x.id===id;})[0]:{};
+  S.modal={type:'emp',data:Object.assign({empType:'Full-time'},e)};
+  var d=S.modal.data;
+  var opts=(S.boot.designations||[]).map(function(x){return '<option value="'+x.id+'"'+(d.designationId===x.id?' selected':'')+'>'+esc(x.name)+'</option>';}).join('');
+  showModal(id?'Edit Employee':'Add Employee',
+    fld('Name',true,'<input id="m_name" value="'+esc(d.name||'')+'">')+
+    fld('Email (optional record)',false,'<input id="m_email" value="'+esc(d.email||'')+'" placeholder="name@clustox.com">')+
+    '<div class="grid2">'+fld('Designation',true,'<select id="m_desig"><option value="">— Select —</option>'+opts+'</select>')+fld('Department',false,'<input id="m_dept" value="'+esc(d.department||'')+'">')+'</div>'+
+    '<div class="grid2">'+fld('Manager',false,'<input id="m_mgr" value="'+esc(d.manager||'')+'">')+fld('Project',false,'<input id="m_proj" value="'+esc(d.project||'')+'">')+'</div>'+
+    fld('Employment Type',false,'<select id="m_type">'+['Full-time','Part-time','Contract','Probation'].map(function(t){return '<option'+(d.empType===t?' selected':'')+'>'+t+'</option>';}).join('')+'</select>'),
+    '<button class="btn" onclick="empSave(\''+(id||'')+'\')">Save</button>');
+}
+function empSave(id){
+  var p={id:id||'',name:val('m_name'),email:val('m_email').trim().toLowerCase(),designationId:val('m_desig'),department:val('m_dept'),manager:val('m_mgr'),project:val('m_proj'),empType:val('m_type')};
+  if(!p.name)return toast('Name is required.','error');
+  if(!p.designationId)return toast('Designation is required.','error');
+  busyModal();
+  run('saveEmployee',p).then(function(){return refreshBoot();}).then(function(){closeModal();go('emps');toast('Employee saved.');}).catch(err);
+}
+function empDelete(id){
+  var e=(S.boot.employees||[]).filter(function(x){return x.id===id;})[0];
+  if(!confirm('Remove '+(e?e.name:'this employee')+'? Their reviews stay in the Reviews data.'))return;
+  run('deleteEmployee',id).then(function(){return refreshBoot();}).then(function(){go('emps');toast('Employee removed.');}).catch(err);
+}
+
+// ─── ADMIN: reviewers & assignments ───────────────────────────────────────────
+function vRvrs(){
+  var b=S.boot, asg=b.assignments||[], emps=b.employees||[];
+  var byRev={};asg.forEach(function(a){var k=String(a.reviewerEmail).toLowerCase();(byRev[k]=byRev[k]||[]).push(a.employeeId);});
+  var html=head('Reviewers & Assignments','Assign employees to a reviewer by their Workspace email','<button class="btn" onclick="asgModal()">＋ New Assignment</button>');
+  var keys=Object.keys(byRev);
+  if(!keys.length)return html+empty('No assignments yet','Assign employees to a reviewer to let them submit evaluations.');
+  html+='<div class="stack">';
+  keys.forEach(function(rv){
+    var ids=byRev[rv];
+    html+='<div class="card"><div class="flex between wrap gap" style="margin-bottom:10px"><div class="flex gap">'+avatar(rv,34,'var(--purple)')+'<div><div style="font-weight:600">'+esc(rv)+'</div><div class="muted" style="font-size:12px">'+ids.length+' employee'+(ids.length===1?'':'s')+' assigned</div></div></div><button class="btn sec sm" onclick="asgModal(\''+esc(rv)+'\')">Edit</button></div>'+
+      '<div class="flex wrap gap">'+ids.map(function(id){var e=emps.filter(function(x){return x.id===id;})[0];return '<span class="pill" style="background:var(--bg);color:var(--text2)">'+esc(e?e.name:'(removed)')+'</span>';}).join('')+'</div></div>';
+  });
+  return html+'</div>';
+}
+function asgModal(rv){
+  var emps=S.boot.employees||[];
+  var current=(S.boot.assignments||[]).filter(function(a){return String(a.reviewerEmail).toLowerCase()===String(rv||'').toLowerCase();}).map(function(a){return a.employeeId;});
+  S.modal={type:'asg'};
+  var list=emps.map(function(e){var on=current.indexOf(e.id)>=0;var dn=(desigById(e.designationId)||{}).name||'';return '<label class="flex gap" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer"><input type="checkbox" class="asg_cb" value="'+e.id+'"'+(on?' checked':'')+' style="width:auto"> <span style="flex:1"><b style="font-weight:600">'+esc(e.name)+'</b> <span class="muted" style="font-size:12px">· '+esc(dn)+'</span></span></label>';}).join('');
+  showModal(rv?'Edit Assignment':'New Assignment',
+    fld('Reviewer email',true,'<input id="m_rev" value="'+esc(rv||'')+'" placeholder="manager@clustox.com"'+(rv?' readonly':'')+'>')+
+    '<div class="field"><label>Employees to assign</label><div style="max-height:300px;overflow-y:auto">'+(list||'<div class="muted">No employees yet.</div>')+'</div></div>',
+    '<button class="btn" onclick="asgSave()">Save Assignment</button>');
+}
+function asgSave(){
+  var rev=val('m_rev').trim().toLowerCase();
+  if(!rev)return toast('Reviewer email required.','error');
+  var ids=[].slice.call(document.querySelectorAll('.asg_cb:checked')).map(function(c){return c.value;});
+  busyModal();
+  run('setAssignments',rev,ids).then(function(res){return refreshBoot().then(function(){return res;});}).then(function(res){closeModal();go('rvrs');toast(res&&res.emailed?'Assignment saved — reviewer emailed.':'Assignment saved.');}).catch(err);
+}
+
+// ─── ADMIN: designations & KPIs ───────────────────────────────────────────────
+function vDesigs(){
+  var ds=S.boot.designations||[];
+  var html=head('Designations & KPIs','Question sets used for each role','<button class="btn" onclick="desigModal()">＋ Add Designation</button>');
+  html+='<div class="stack">';
+  ds.forEach(function(d){
+    var sum=d.kpis.reduce(function(s,k){return s+Number(k.weight);},0);
+    html+='<div class="card"><div class="flex between wrap gap" style="margin-bottom:6px"><div><div style="font-weight:700;font-size:15px">'+esc(d.name)+'</div><div class="muted" style="font-size:12px;font-style:italic">'+esc(d.identity||'')+'</div></div><div class="flex gap"><span class="tag" style="background:'+(Math.round(sum)===100?'var(--greenL);color:var(--green)':'var(--amberL);color:var(--amber)')+'">Weights '+sum+'%</span><button class="btn sec sm" onclick="desigModal(\''+d.id+'\')">Edit</button><button class="btn danger sm" onclick="desigDelete(\''+d.id+'\')">Delete</button></div></div>';
+    html+='<table class="tbl" style="margin-top:10px"><thead><tr><th>KPI</th><th style="width:80px">Weight</th><th>Description</th></tr></thead><tbody>'+
+      d.kpis.map(function(k){return '<tr><td style="font-weight:600">'+esc(k.name)+'</td><td><span class="tag" style="background:var(--blueL);color:var(--blue)">'+k.weight+'%</span></td><td class="muted">'+esc(k.desc||'')+'</td></tr>';}).join('')+'</tbody></table>';
+    html+='<div class="muted" style="font-size:12px;margin-top:8px">Professional standards: '+d.behaviors.map(function(b){return esc(b.name);}).join(' · ')+'</div></div>';
+  });
+  return html+'</div>';
+}
+function desigModal(id){
+  var d=id?JSON.parse(JSON.stringify(desigById(id))):{name:'',identity:'',kpis:[],behaviors:[{id:'b1',name:'Professionalism & Accountability',desc:'',question:''},{id:'b2',name:'Collaboration & Communication',desc:'',question:''}]};
+  S.modal={type:'desig',data:d,editId:id||''};
+  drawDesigModal();
+}
+function drawDesigModal(){
+  var d=S.modal.data;
+  var sum=d.kpis.reduce(function(s,k){return s+(Number(k.weight)||0);},0);
+  var kpiRows=d.kpis.map(function(k,i){return '<div class="card" style="padding:12px;margin-bottom:8px"><div class="grid2"><div class="field" style="margin:0"><label>KPI name</label><input value="'+esc(k.name)+'" oninput="dK('+i+',\'name\',this.value)"></div><div class="field" style="margin:0"><label>Weight %</label><input type="number" value="'+esc(k.weight)+'" oninput="dK('+i+',\'weight\',this.value)"></div></div><div class="field" style="margin:8px 0 0"><label>Description</label><textarea oninput="dK('+i+',\'desc\',this.value)" rows="2">'+esc(k.desc||'')+'</textarea></div><div class="field" style="margin:8px 0 0"><label>Reviewer question</label><input value="'+esc(k.question||'')+'" oninput="dK('+i+',\'question\',this.value)"></div><div style="text-align:right;margin-top:6px"><button class="btn danger sm" onclick="dKdel('+i+')">Remove KPI</button></div></div>';}).join('');
+  var body=fld('Designation name',true,'<input value="'+esc(d.name)+'" oninput="S.modal.data.name=this.value">')+
+    fld('Role identity',false,'<input value="'+esc(d.identity||'')+'" oninput="S.modal.data.identity=this.value">')+
+    '<div class="flex between" style="margin:10px 0 8px"><label style="font-weight:600;font-size:13px">KPIs</label><span class="tag" style="background:'+(Math.round(sum)===100?'var(--greenL);color:var(--green)':'var(--amberL);color:var(--amber)')+'">Total '+sum+'% (must be 100%)</span></div>'+
+    kpiRows+'<button class="btn sec sm" onclick="dKadd()">＋ Add KPI</button>';
+  showModal(S.modal.editId?'Edit Designation':'Add Designation',body,'<button class="btn" onclick="desigSave()">Save Designation</button>',640);
+}
+function dK(i,k,v){S.modal.data.kpis[i][k]=k==='weight'?Number(v):v;if(k==='weight')drawDesigModal();}
+function dKadd(){S.modal.data.kpis.push({id:'k'+(S.modal.data.kpis.length+1),name:'',weight:0,desc:'',question:''});drawDesigModal();}
+function dKdel(i){S.modal.data.kpis.splice(i,1);drawDesigModal();}
+function desigSave(){
+  var d=S.modal.data;d.id=S.modal.editId;
+  if(!d.name)return toast('Name is required.','error');
+  busyModal();
+  run('saveDesignation',d).then(function(){return refreshBoot();}).then(function(){closeModal();go('desigs');toast('Designation saved.');}).catch(function(e){drawDesigModal();err(e);});
+}
+function desigDelete(id){if(!confirm('Delete this designation and its KPIs?'))return;run('deleteDesignation',id).then(function(){return refreshBoot();}).then(function(){go('desigs');toast('Deleted.');}).catch(err);}
+
+// ─── ADMIN: reports ───────────────────────────────────────────────────────────
+var rep={c:'all',d:'all',r:'all',sort:'recent'};
+function vReports(){
+  var subs=(S.boot.reviews||[]).filter(function(r){return r.status==='submitted';});
+  var html=head('Reports','Company-wide performance overview','<button class="btn sec" onclick="exportCSV()">⬇ Export CSV</button>');
+  if(!subs.length)return html+empty('No evaluations yet','Submitted evaluations will appear here.');
+  var cyc=uniq(subs.map(function(r){return r.cycle;})), dn=uniq(subs.map(function(r){return r.designationName;})), rcs=uniq(subs.map(function(r){return r.recommendation;}));
+  var fil=subs.filter(function(r){return (rep.c==='all'||r.cycle===rep.c)&&(rep.d==='all'||r.designationName===rep.d)&&(rep.r==='all'||r.recommendation===rep.r);});
+  fil.sort(function(a,b){return rep.sort==='name'?a.empName.localeCompare(b.empName):rep.sort==='score_d'?b.jobScore-a.jobScore:rep.sort==='score_a'?a.jobScore-b.jobScore:b.submittedAt-a.submittedAt;});
+  var avg=fil.length?fil.reduce(function(s,r){return s+r.jobScore;},0)/fil.length:0;
+  var hi=fil.filter(function(r){return r.jobScore>=4.5&&r.behaviorGate==='meets';}).length;
+  var risk=fil.filter(function(r){return r.recommendation==='PIP / Immediate Action'||r.recommendation==='Improvement Plan';}).length;
+  html+='<div class="grid4" style="margin-bottom:18px">'+
+    statCard('Total Reviews',fil.length,'📋','var(--blue)','var(--blueL)')+
+    statCard('Avg Score',avg.toFixed(2),'📈',avg>=4?'var(--green)':avg>=3?'var(--blue)':'var(--amber)',avg>=4?'var(--greenL)':avg>=3?'var(--blueL)':'var(--amberL)')+
+    statCard('High Performers',hi,'🏆','var(--green)','var(--greenL)')+
+    statCard('At Risk',risk,'⚠️','var(--red)','var(--redL)')+'</div>';
+  // filters
+  html+='<div class="card" style="margin-bottom:16px;padding:14px"><div class="flex wrap gap">'+
+    sel('rep.c',rep.c,['all'].concat(cyc),'Cycle')+sel('rep.d',rep.d,['all'].concat(dn),'Designation')+sel('rep.r',rep.r,['all'].concat(rcs),'Recommendation')+
+    '<select onchange="rep.sort=this.value;renderView()" style="width:auto"><option value="recent"'+(rep.sort==='recent'?' selected':'')+'>Most recent</option><option value="score_d"'+(rep.sort==='score_d'?' selected':'')+'>Score high→low</option><option value="score_a"'+(rep.sort==='score_a'?' selected':'')+'>Score low→high</option><option value="name"'+(rep.sort==='name'?' selected':'')+'>Name A→Z</option></select></div></div>';
+  html+='<table class="tbl"><thead><tr><th>Employee</th><th>Designation</th><th>Cycle</th><th>Reviewer</th><th>Score</th><th>Recommendation</th><th></th></tr></thead><tbody>';
+  fil.forEach(function(r){var rc=getRec(r.jobScore,r.behaviorGate);html+='<tr><td><div class="flex gap">'+avatar(r.empName,30)+'<span style="font-weight:600">'+esc(r.empName)+'</span></div></td><td>'+esc(r.designationName)+'</td><td>'+esc(r.cycle)+'</td><td class="muted">'+esc(r.reviewerEmail)+'</td><td style="font-weight:700;color:'+rc.color+'">'+r.jobScore.toFixed(2)+'</td><td><span class="tag" style="background:'+rc.bg+';color:'+rc.color+'">'+rc.icon+' '+esc(rc.label)+'</span></td><td style="text-align:right"><button class="btn sec sm" onclick="viewReview(\''+r.id+'\')">View</button></td></tr>';});
+  return html+'</tbody></table>';
+}
+function statCard(l,v,ic,c,bg){return '<div class="stat"><div class="ic" style="background:'+bg+'">'+ic+'</div><div class="v">'+v+'</div><div class="l">'+l+'</div></div>';}
+function sel(model,cur,opts,label){return '<select onchange="setRep(\''+model+'\',this.value)" style="width:auto">'+opts.map(function(o){return '<option value="'+esc(o)+'"'+(cur===o?' selected':'')+'>'+(o==='all'?'All '+label+'s':esc(o))+'</option>';}).join('')+'</select>';}
+function setRep(model,v){rep[model.split('.')[1]]=v;renderView();}
+function uniq(a){return a.filter(function(v,i){return a.indexOf(v)===i;}).sort();}
+function viewReview(id){
+  var r=(S.boot.reviews||[]).filter(function(x){return x.id===id;})[0];if(!r)return;
+  showReviewDetail(r);
+}
+function showReviewDetail(r){
+  var d=desigById(r.designationId)||{kpis:[],behaviors:[]};var rc=getRec(r.jobScore,r.behaviorGate);
+  var kp=d.kpis.map(function(k,i){return '<div class="flex between" style="padding:6px 0;border-bottom:1px solid var(--border)"><span>'+esc(k.name)+' <span class="muted">('+k.weight+'%)</span></span><b style="color:'+(RCOLORS[r.ratings[i]]||'var(--text4)')+'">'+(r.ratings[i]||'—')+'</b></div>';}).join('');
+  showModal(r.empName+' · '+r.cycle,
+    '<div class="card" style="background:'+rc.bg+';border:none;text-align:center;margin-bottom:14px"><div style="font-size:26px">'+rc.icon+'</div><div style="font-weight:700;font-size:18px;color:'+rc.color+'">'+esc(rc.label)+'</div><div class="muted" style="font-size:12px">Score '+r.jobScore.toFixed(2)+' · Reviewer '+esc(r.reviewerEmail)+'</div></div>'+
+    '<div style="font-weight:600;margin-bottom:6px">KPI Ratings</div>'+kp+
+    (r.mgrComments?'<div style="margin-top:12px"><div style="font-weight:600;margin-bottom:4px">Manager Comments</div><div class="muted">'+esc(r.mgrComments)+'</div></div>':'')+
+    (r.promotion?'<div style="margin-top:10px"><b>Promotion readiness:</b> '+esc(r.promotion)+'</div>':''),
+    '<button class="btn sec" onclick="closeModal()">Close</button>');
+}
+function exportCSV(){
+  var subs=(S.boot.reviews||[]).filter(function(r){return r.status==='submitted';});
+  var fil=subs.filter(function(r){return (rep.c==='all'||r.cycle===rep.c)&&(rep.d==='all'||r.designationName===rep.d)&&(rep.r==='all'||r.recommendation===rep.r);});
+  var h=['Employee','Designation','Department','Cycle','Reviewer','Job Score','Professional Standard','Recommendation','Promotion','Submitted'];
+  var rows=fil.map(function(r){return ['"'+r.empName+'"','"'+r.designationName+'"','"'+(r.department||'')+'"','"'+r.cycle+'"','"'+r.reviewerEmail+'"',r.jobScore.toFixed(2),r.behaviorGate,'"'+r.recommendation+'"','"'+(r.promotion||'')+'"',new Date(r.submittedAt).toLocaleDateString()].join(',');});
+  var csv=[h.join(','),].concat(rows).join('\n');
+  var a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);a.download='clustox_cbpms_report.csv';document.body.appendChild(a);a.click();a.remove();toast('CSV exported.');
+}
+
+// ─── REVIEWER: evaluation wizard ──────────────────────────────────────────────
+function vEval(){
+  var b=S.boot;
+  if(!b.myEmployees.length)return head('My Evaluations','')+empty('No employees assigned','Your admin hasn\'t assigned anyone to you yet.');
+  if(!S.wiz)S.wiz={step:0,empId:'',cyc:'',rat:{},nt:{},beh:{},bn:{},com:'',pro:'',done:false};
+  var w=S.wiz;
+  var html=head('My Evaluations',b.myEmployees.length+' employee'+(b.myEmployees.length===1?'':'s')+' assigned to you');
+  if(w.done){
+    var emp=b.myEmployees.filter(function(e){return e.id===w.empId;})[0]||{};var dsg=desigById(emp.designationId)||{kpis:[],behaviors:[]};
+    var rc=getRec(calcScore(dsg.kpis,w.rat),calcGate(dsg.behaviors,w.beh));
+    return html+'<div class="card" style="max-width:520px;text-align:center;background:var(--greenL);border:none"><div style="font-size:30px">✅</div><h2 style="margin:8px 0">Review Submitted!</h2><p class="muted">'+esc(emp.name)+' · '+esc(dsg.name)+' · '+esc(w.cyc)+'</p><div class="card" style="display:inline-block;margin:14px 0;background:'+rc.bg+';border:none"><div style="font-size:22px">'+rc.icon+'</div><div style="font-weight:700;color:'+rc.color+'">'+esc(rc.label)+'</div></div><div><button class="btn sec" onclick="S.wiz=null;renderView()">Evaluate Another</button></div></div>';
+  }
+  // steps indicator
+  var labels=['Select','Rate','Submit'];
+  html+='<div class="steps">'+labels.map(function(l,i){return '<div class="dot'+(w.step>=i?' on':'')+'">'+(w.step>i?'✓':i+1)+'</div>'+(i<2?'<div class="ln'+(w.step>i?' on':'')+'"></div>':'');}).join('')+'</div>';
+  if(w.step===0)html+=evalStep0();else html+=evalStep1();
+  return html;
+}
+function evalStep0(){
+  var b=S.boot,w=S.wiz;
+  var emp=b.myEmployees.filter(function(e){return e.id===w.empId;})[0];var dsg=emp?desigById(emp.designationId):null;
+  var existing=emp&&w.cyc?b.myReviews.filter(function(r){return r.empId===emp.id&&r.cycle===w.cyc;})[0]:null;
+  var html='<div class="card"><div style="font-weight:600;margin-bottom:14px">Select Employee to Evaluate</div><div class="grid2">'+
+    fld('Employee',true,'<select onchange="evalPick(this.value)"><option value="">— Select —</option>'+b.myEmployees.map(function(e){return '<option value="'+e.id+'"'+(w.empId===e.id?' selected':'')+'>'+esc(e.name)+'</option>';}).join('')+'</select>')+
+    fld('Review Cycle',true,'<select onchange="S.wiz.cyc=this.value;loadDraft();renderView()"><option value="">— Select —</option>'+b.cycles.map(function(c){return '<option'+(w.cyc===c?' selected':'')+'>'+esc(c)+'</option>';}).join('')+'</select>')+'</div>';
+  if(emp&&dsg){
+    html+='<div class="card" style="background:var(--bg);border:none;margin-top:6px"><div class="flex gap">'+avatar(emp.name,38)+'<div><div style="font-weight:600">'+esc(emp.name)+'</div><div class="muted" style="font-size:12px">'+esc(dsg.name)+(emp.department?' · '+esc(emp.department):'')+'</div></div></div><div class="muted" style="font-size:12px;font-style:italic;margin:8px 0"><span></span>'+esc(dsg.identity||'')+'</div><div class="flex gap"><span class="tag" style="background:var(--greenL);color:var(--green)">'+dsg.kpis.length+' KPIs</span><span class="tag" style="background:var(--purpleL);color:var(--purple)">'+dsg.behaviors.length+' Standards</span>'+(existing?'<span class="tag" style="background:var(--amberL);color:var(--amber)">'+(existing.status==='submitted'?'Already submitted — will overwrite':'Draft in progress')+'</span>':'')+'</div></div>';
+  }
+  html+='<div style="margin-top:14px"><button class="btn" onclick="evalStart()">Start Evaluation →</button></div></div>';
+  return html;
+}
+function evalPick(id){S.wiz.empId=id;S.wiz.rat={};S.wiz.nt={};S.wiz.beh={};S.wiz.bn={};S.wiz.com='';S.wiz.pro='';loadDraft();renderView();}
+function loadDraft(){
+  var w=S.wiz;if(!w.empId||!w.cyc)return;
+  var ex=S.boot.myReviews.filter(function(r){return r.empId===w.empId&&r.cycle===w.cyc;})[0];
+  if(ex){w.rat=ex.ratings||{};w.nt=ex.notes||{};w.beh=ex.behaviors||{};w.bn=ex.behaviorNotes||{};w.com=ex.mgrComments||'';w.pro=ex.promotion||'';}
+}
+function evalStart(){var w=S.wiz;if(!w.empId)return toast('Select an employee.','error');if(!w.cyc)return toast('Select a cycle.','error');var dsg=desigById(S.boot.myEmployees.filter(function(e){return e.id===w.empId;})[0].designationId);if(!dsg||!dsg.kpis.length)return toast('No KPIs configured for this role.','error');w.step=1;renderView();}
+function evalStep1(){
+  var b=S.boot,w=S.wiz;var emp=b.myEmployees.filter(function(e){return e.id===w.empId;})[0];var dsg=desigById(emp.designationId);
+  var sc=calcScore(dsg.kpis,w.rat),gt=calcGate(dsg.behaviors,w.beh),rc=getRec(sc,gt);
+  var rated=dsg.kpis.filter(function(_,i){return w.rat[i]>0;}).length;
+  var html='<div class="card flex between wrap gap" style="margin-bottom:14px"><div class="flex gap">'+avatar(emp.name,32)+'<div><div style="font-weight:600;font-size:13px">'+esc(emp.name)+'</div><div class="muted" style="font-size:11px">'+esc(dsg.name)+' · '+esc(w.cyc)+'</div></div></div><span class="pill" style="background:'+(rated===dsg.kpis.length?'var(--greenL);color:var(--green)':'var(--amberL);color:var(--amber)')+'">'+rated+'/'+dsg.kpis.length+' rated · Score '+sc.toFixed(2)+'</span></div>';
+  // KPIs
+  html+='<div class="card" style="margin-bottom:14px"><div style="font-weight:600;margin-bottom:16px">📊 Job KPIs — rate 1 (low) to 5 (high)</div>';
+  dsg.kpis.forEach(function(k,i){var r=w.rat[i]||0;
+    html+='<div class="kpi-row"><div class="flex between wrap gap"><div style="flex:1;min-width:200px"><div class="flex gap wrap"><b style="font-weight:600">'+esc(k.name)+'</b><span class="tag" style="background:var(--blueL);color:var(--blue)">'+k.weight+'%</span></div><div class="muted" style="font-size:12px;margin:4px 0">'+esc(k.desc||'')+'</div>'+(k.question?'<div class="muted" style="font-size:12px;font-style:italic">› '+esc(k.question)+'</div>':'')+'</div><div style="text-align:right"><div class="flex gap" style="justify-content:flex-end">'+[1,2,3,4,5].map(function(v){return '<button class="rate" style="'+(r===v?'border-color:'+RCOLORS[v]+';color:'+RCOLORS[v]+';background:color-mix(in srgb,'+RCOLORS[v]+' 12%,#fff)':'')+'" onclick="setRat('+i+','+v+')">'+v+'</button>';}).join('')+'</div><div style="font-size:11px;font-weight:600;margin-top:4px;color:'+(r?RCOLORS[r]:'var(--text4)')+'">'+(RLABELS[r]||'Not rated')+'</div></div></div>'+
+      '<textarea placeholder="Evidence / notes for this KPI…" rows="2" style="margin-top:8px;font-size:12px" oninput="S.wiz.nt['+i+']=this.value">'+esc(w.nt[i]||'')+'</textarea></div>';
+  });
+  html+='</div>';
+  // behaviors
+  html+='<div class="card" style="margin-bottom:14px"><div style="font-weight:600;margin-bottom:16px">🛡 Professional Standards</div>';
+  dsg.behaviors.forEach(function(bh,i){var sl=w.beh[i]||'';
+    html+='<div class="kpi-row"><div class="flex between wrap gap"><div style="flex:1"><b style="font-weight:600">'+esc(bh.name)+'</b><div class="muted" style="font-size:12px">'+esc(bh.desc||'')+'</div></div><div class="flex gap">'+[['meets','Meets','var(--green)'],['watch','Improvement','var(--amber)'],['critical','Unsatisfactory','var(--red)']].map(function(o){return '<button class="beh" style="'+(sl===o[0]?'border-color:'+o[2]+';color:'+o[2]+';background:color-mix(in srgb,'+o[2]+' 12%,#fff)':'')+'" onclick="setBeh('+i+',\''+o[0]+'\')">'+o[1]+'</button>';}).join('')+'</div></div><textarea placeholder="Behavioral evidence…" rows="2" style="margin-top:8px;font-size:12px" oninput="S.wiz.bn['+i+']=this.value">'+esc(w.bn[i]||'')+'</textarea></div>';
+  });
+  html+='</div>';
+  // final
+  html+='<div class="card" style="margin-bottom:14px"><div style="font-weight:600;margin-bottom:12px">Final Assessment</div>'+
+    fld('Promotion Readiness',false,'<select onchange="S.wiz.pro=this.value"><option value="">— Select —</option>'+['Yes – Ready now','Not yet – 1 cycle away','No – Focus on current role'].map(function(o){return '<option'+(w.pro===o?' selected':'')+'>'+o+'</option>';}).join('')+'</select>')+
+    fld('Manager Comments',false,'<textarea rows="4" oninput="S.wiz.com=this.value" placeholder="Summary, context, development notes…">'+esc(w.com||'')+'</textarea>')+'</div>';
+  // summary + actions
+  html+='<div class="card flex between wrap gap" style="background:'+rc.bg+';border:none"><div class="flex gap"><div style="font-size:26px">'+rc.icon+'</div><div><div style="font-weight:700;color:'+rc.color+'">'+esc(rc.label)+'</div><div class="muted" style="font-size:12px">Score '+sc.toFixed(2)+'</div></div></div><div class="flex gap"><button class="btn sec" onclick="S.wiz.step=0;renderView()">← Back</button><button class="btn sec" onclick="evalSubmit(\'draft\')">Save Draft</button><button class="btn" onclick="evalSubmit(\'submitted\')">Submit Review</button></div></div>';
+  return html;
+}
+function setRat(i,v){S.wiz.rat[i]=v;renderView();}
+function setBeh(i,v){S.wiz.beh[i]=v;renderView();}
+function evalSubmit(status){
+  var w=S.wiz;var emp=S.boot.myEmployees.filter(function(e){return e.id===w.empId;})[0];
+  var p={empId:w.empId,cycle:w.cyc,status:status,reviewerName:S.boot.user.email,ratings:w.rat,notes:w.nt,behaviors:w.beh,behaviorNotes:w.bn,mgrComments:w.com,promotion:w.pro};
+  toast(status==='draft'?'Saving draft…':'Submitting…');
+  run('saveReview',p).then(function(){return refreshBoot();}).then(function(){
+    if(status==='submitted'){S.wiz.done=true;}else{toast('Draft saved.');}
+    renderView();
+  }).catch(err);
+}
+
+// ─── REVIEWER: my reviews (drafts + submitted) ────────────────────────────────
+function vDone(){
+  var mine=(S.boot.myReviews||[]).slice().sort(function(a,b){return (b.updatedAt||b.submittedAt||0)-(a.updatedAt||a.submittedAt||0);});
+  var drafts=mine.filter(function(r){return r.status!=='submitted';});
+  var subs=mine.filter(function(r){return r.status==='submitted';});
+  var html=head('My Reviews',mine.length+' review'+(mine.length===1?'':'s')+' · '+drafts.length+' draft'+(drafts.length===1?'':'s')+', '+subs.length+' submitted');
+  if(!mine.length)return html+empty('No reviews yet','Start an evaluation under "My Evaluations". Drafts and submitted reviews both show up here.');
+  function row(r){
+    var rc=getRec(r.jobScore,r.behaviorGate);
+    var isDraft=r.status!=='submitted';
+    var meta=esc(r.designationName)+' · '+esc(r.cycle)+(r.submittedAt?' · '+new Date(r.submittedAt).toLocaleDateString():'');
+    var badge=isDraft?'<span class="tag" style="background:var(--amberL);color:var(--amber)">Draft</span>':'<span class="tag" style="background:'+rc.bg+';color:'+rc.color+'">'+rc.icon+' '+esc(rc.label)+'</span>';
+    var act=isDraft
+      ? '<button class="btn sm" onclick="openReview(\''+r.empId+'\',\''+esc(r.cycle)+'\')">Resume</button>'
+      : '<span style="font-weight:700;color:'+rc.color+'">'+r.jobScore.toFixed(1)+'</span><button class="btn sec sm" onclick="openReview(\''+r.empId+'\',\''+esc(r.cycle)+'\')">View</button>';
+    return '<div class="card flex between wrap gap"><div class="flex gap">'+avatar(r.empName,38)+'<div><div style="font-weight:600">'+esc(r.empName)+'</div><div class="muted" style="font-size:12px">'+meta+'</div></div></div><div class="flex gap">'+badge+act+'</div></div>';
+  }
+  if(drafts.length){html+='<div style="font-weight:600;font-size:13px;color:var(--text3);margin:4px 0 8px">In progress</div><div class="stack">'+drafts.map(row).join('')+'</div>';}
+  if(subs.length){html+='<div style="font-weight:600;font-size:13px;color:var(--text3);margin:18px 0 8px">Submitted</div><div class="stack">'+subs.map(row).join('')+'</div>';}
+  return html;
+}
+// Open one of my own reviews: drafts resume in the wizard, submitted open read-only then can be revisited.
+function openReview(empId,cyc){
+  var r=(S.boot.myReviews||[]).filter(function(x){return x.empId===empId&&x.cycle===cyc;})[0];
+  if(!r)return;
+  if(r.status==='submitted'){ showReviewDetail(r); return; }
+  // resume draft in the evaluation wizard
+  if(!(S.boot.myEmployees||[]).some(function(e){return e.id===empId;})){toast('This employee is no longer assigned to you.','error');return;}
+  S.tab='eval';
+  S.wiz={step:1,empId:empId,cyc:cyc,rat:{},nt:{},beh:{},bn:{},com:'',pro:'',done:false};
+  loadDraft();
+  renderShell();
+}
+
+// ─── modal + misc ─────────────────────────────────────────────────────────────
+function fld(label,req,inner){return '<div class="field"><label>'+esc(label)+(req?'<span class="req">*</span>':'')+'</label>'+inner+'</div>';}
+function val(id){var e=document.getElementById(id);return e?e.value:'';}
+function showModal(title,body,footer,width){
+  var bg=document.createElement('div');bg.className='modal-bg';bg.id='modalbg';
+  bg.innerHTML='<div class="modal"'+(width?' style="max-width:'+width+'px"':'')+'><div class="modal-h">'+esc(title)+'<button onclick="closeModal()" style="font-size:18px;color:var(--text3)">✕</button></div><div class="modal-b">'+body+'</div><div class="modal-b" style="padding-top:0;text-align:right">'+(footer||'')+'</div></div>';
+  bg.addEventListener('click',function(e){if(e.target===bg)closeModal();});
+  document.body.appendChild(bg);
+}
+function closeModal(){var m=$('#modalbg');if(m)m.remove();S.modal=null;}
+function busyModal(){var f=$('#modalbg');if(f){var btns=f.querySelectorAll('.btn');btns.forEach(function(b){b.disabled=true;});}}
+function err(e){toast((e&&e.message)||String(e),'error');var f=$('#modalbg');if(f)f.querySelectorAll('.btn').forEach(function(b){b.disabled=false;});}
+function refreshBoot(){return run('getBootstrap').then(function(b){S.boot=b;});}
+</script>
