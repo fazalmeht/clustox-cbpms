@@ -413,6 +413,7 @@ function SidebarSection({session,links,active,onSet}){
 // Keep MainArea aware of active tab via prop-drilling through Sidebar — we'll lift tab state
 function MainArea({session,desigs,saveD,emps,saveE,revs,saveRevs,reviewers,saveRvrs,assign,saveAssign,creds,saveCreds,myAssigned,toast,onLogout}){
   const [tab,setTab]=useState(session.role==="admin"?"dash":"myrevs");
+  const [editPreload,setEditPreload]=useState(null); // {empId, cyc} for approved edits
   
   // Override sidebar — render custom sidebar with setTab
   return(
@@ -443,8 +444,8 @@ function MainArea({session,desigs,saveD,emps,saveE,revs,saveRevs,reviewers,saveR
           )}
           {session.role==="reviewer"&&(
             <>
-              {tab==="myrevs"&&<ReviewerView session={session} desigs={desigs} emps={emps} revs={revs} saveRevs={saveRevs} assign={assign} toast={toast}/>}
-              {tab==="done"&&<ReviewerDone session={session} revs={revs} saveRevs={saveRevs} desigs={desigs} toast={toast}/>}
+              {tab==="myrevs"&&<ReviewerView session={session} desigs={desigs} emps={emps} revs={revs} saveRevs={saveRevs} assign={assign} toast={toast} editPreload={editPreload} onEditDone={()=>setEditPreload(null)}/>}
+              {tab==="done"&&<ReviewerDone session={session} revs={revs} saveRevs={saveRevs} desigs={desigs} emps={emps} assign={assign} toast={toast} onEditApproved={(empId,cyc)=>{setEditPreload({empId,cyc});setTab("myrevs");}}/>}
             </>
           )}
         </main>
@@ -1081,7 +1082,7 @@ function SecurityView({creds,saveCreds,toast}){
   </div>);
 }
 // ─── REVIEWER VIEW ────────────────────────────────────────────────────────────
-function ReviewerView({session,desigs,emps,revs,saveRevs,assign,toast}){
+function ReviewerView({session,desigs,emps,revs,saveRevs,assign,toast,editPreload,onEditDone}){
   const [step,setStep]=useState(0); // 0=select, 1=kpis, 2=preview
   const [empId,setEmpId]=useState("");const [cyc,setCyc]=useState("");
   const [rat,setRat]=useState({});const [nt,setNt]=useState({});
@@ -1091,6 +1092,25 @@ function ReviewerView({session,desigs,emps,revs,saveRevs,assign,toast}){
 
   const myIds=assign[session.id]||[];
   const myEmps=emps.filter(e=>myIds.includes(e.id));
+  
+  // Auto-load edit-approved review
+  useEffect(()=>{
+    if(editPreload&&editPreload.empId&&editPreload.cyc){
+      const rev=revs.find(r=>r.empId===editPreload.empId&&r.cycle===editPreload.cyc);
+      if(rev){
+        setEmpId(editPreload.empId);
+        setCyc(editPreload.cyc);
+        setRat(rev.ratings||{});
+        setNt(rev.notes||{});
+        setBeh(rev.behaviors||{});
+        setBn(rev.behaviorNotes||{});
+        setCom(rev.mgrComments||"");
+        setPro(rev.promotion||"");
+        setStep(1); // go straight to rating step
+        if(onEditDone) onEditDone(); // clear preload
+      }
+    }
+  },[editPreload]);
   const emp=myEmps.find(x=>x.id===empId);
   const dsg=emp?desigs.find(x=>x.id===emp.designationId):null;
   const kpis=dsg?.kpis||[];const bl=dsg?.behaviors||[];
@@ -1102,8 +1122,10 @@ function ReviewerView({session,desigs,emps,revs,saveRevs,assign,toast}){
     if(rated<kpis.length){toast(`Please rate all ${kpis.length} KPIs.`,"error");return;}
     const missingEvidence=kpis.filter((_,i)=>!nt[i]||!nt[i].trim());
     if(missingEvidence.length>0){toast(`Evidence is required for all KPIs — ${missingEvidence.length} still missing.`,"error");return;}
-    const tok=uid()+uid();
-    const rev={id:uid(),token:tok,empId:emp.id,empName:emp.name,designationId:dsg.id,designationName:dsg.name,department:emp.department||"",project:emp.project||"",reviewerName:session.name||session.username,reviewerId:session.id,cycle:cyc,ratings:{...rat},notes:{...nt},behaviors:{...beh},behaviorNotes:{...bn},jobScore:sc,behaviorGate:gt,recommendation:rc.label,mgrComments:com,promotion:pro,submittedAt:Date.now()};
+    // Preserve token from existing review if editing, otherwise generate new
+    const existingRev=revs.find(r=>r.empId===emp.id&&r.cycle===cyc);
+    const tok=existingRev&&existingRev.token?existingRev.token:uid()+uid();
+    const rev={id:uid(),token:tok,empId:emp.id,empName:emp.name,designationId:dsg.id,designationName:dsg.name,department:emp.department||"",project:emp.project||"",reviewerName:session.name||session.username,reviewerId:session.id,cycle:cyc,ratings:{...rat},notes:{...nt},behaviors:{...beh},behaviorNotes:{...bn},jobScore:sc,behaviorGate:gt,recommendation:rc.label,mgrComments:com,promotion:pro,submittedAt:Date.now(),editRequest:null};
     const idx=revs.findIndex(r=>r.empId===emp.id&&r.cycle===cyc);
     saveRevs(idx>=0?revs.map((r,i)=>i===idx?rev:r):[...revs,rev]);
     setDone(true);toast("Review submitted!");
@@ -1284,7 +1306,7 @@ function ReviewerView({session,desigs,emps,revs,saveRevs,assign,toast}){
   </div>);
 }
 
-function ReviewerDone({session,revs,saveRevs,desigs,toast}){
+function ReviewerDone({session,revs,saveRevs,desigs,emps,assign,toast,onEditApproved}){
   const myRevs=revs.filter(r=>r.reviewerId===session.id);
   const [cpd,setCpd]=useState(null);
   const [editReq,setEditReq]=useState(null); // {revId, msg}
@@ -1300,8 +1322,10 @@ Provide a reason for the edit request:`);
     toast("Edit request sent to Admin.");
   };
   
-  const canEdit=(rev)=>rev.editRequest&&rev.editRequest.status==="approved";
-  const cpLink=(r)=>{const l=`${window.location.origin}${window.location.pathname}?view=${r.token}`;navigator.clipboard.writeText(l);setCpd(r.id);setTimeout(()=>setCpd(null),2200);toast("Link copied!");};
+  const openReview=(empId,cyc)=>{
+    if(onEditApproved) onEditApproved(empId,cyc);
+  };
+  // Copy link removed from reviewer view - admin only feature
   return(<div>
     <PageHeader icon="check2" title="Completed Reviews" sub={`${myRevs.length} review${myRevs.length===1?"":"s"} submitted`}/>
     {myRevs.length===0?<Card><Empty icon="review" title="No completed reviews yet" sub="Reviews you submit will appear here."/></Card>:
@@ -1316,7 +1340,7 @@ Provide a reason for the edit request:`);
             </div>
             <div style={{fontSize:22,fontWeight:700,color:rc.color,marginRight:4}}>{r.jobScore.toFixed(1)}</div>
             <RecBadge {...rc}/>
-            {r.token&&<button onClick={()=>cpLink(r)} style={{display:"flex",alignItems:"center",gap:6,padding:"6px 12px",border:`1px solid ${cpd===r.id?C.green:C.border}`,borderRadius:8,background:cpd===r.id?C.greenL:C.white,color:cpd===r.id?C.green:C.text3,fontSize:12,fontWeight:500,cursor:"pointer",fontFamily:"Inter,sans-serif"}}><Ic n={cpd===r.id?"tick":"copy"} sz={12} c={cpd===r.id?C.green:C.text3}/>{cpd===r.id?"Copied":"Copy Link"}</button>}
+            {/* Copy link removed — admin only */}
               {/* Edit controls */}
               {!r.editRequest&&<button onClick={()=>requestEdit(r)} style={{display:"flex",alignItems:"center",gap:5,padding:"6px 12px",border:`1px solid ${C.amber}`,borderRadius:8,background:C.amberL,color:C.amber,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"Inter,sans-serif"}}>✏️ Request Edit</button>}
               {r.editRequest&&r.editRequest.status==="pending"&&<span style={{display:"flex",alignItems:"center",gap:5,padding:"6px 12px",background:"#FFF7ED",border:`1px solid ${C.amber}`,borderRadius:8,fontSize:12,color:C.amber,fontWeight:600}}>⏳ Edit Pending Approval</span>}
