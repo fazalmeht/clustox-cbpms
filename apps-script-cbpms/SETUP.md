@@ -12,7 +12,7 @@ A secure rebuild of the CBPMS as a Google Apps Script web app:
 | File | Purpose |
 |------|---------|
 | `Code.gs` | Server: identity/role checks, scoring, all read/write API |
-| `Setup.gs` | One-time `setup()` + the seeded 5 designations & KPIs |
+| `Setup.gs` | One-time `setup()` + the seeded 14 designations & KPIs |
 | `Index.html` | HTML shell (includes the two below) |
 | `Styles.html` | All CSS (Clustox design tokens) |
 | `JavaScript.html` | The single-page UI (admin + reviewer + employee views) |
@@ -24,7 +24,7 @@ A secure rebuild of the CBPMS as a Google Apps Script web app:
 2. **Project Settings** → tick **"Show appsscript.json manifest file in editor"**.
 3. Recreate each file with the exact names above (use **＋ → Script** for `.gs`, **＋ → HTML** for the `.html` files — type the name *without* the extension). Paste contents from this folder.
 4. Save all files.
-5. **Run ▸ `setup`** (from `Setup.gs`). Approve the OAuth consent screen the first time. This creates the data Spreadsheet, builds the tabs, seeds the 5 designations, and registers **you** as the first admin. Check **View ▸ Logs** for the Spreadsheet id.
+5. **Run ▸ `setup`** (from `Setup.gs`). Approve the OAuth consent screen the first time. This creates the data Spreadsheet, builds the tabs, seeds the 14 designations, and registers **you** as the first admin. Check **View ▸ Logs** for the Spreadsheet id.
 6. **Deploy ▸ New deployment ▸ Web app**:
    - Execute as: **Me** (the owner) — **important**, see note below
    - Who has access: **clustox.com** (your domain)
@@ -51,7 +51,7 @@ After the first `setup()` run, set the deployment to **Execute as: Me** and **Ac
 2. Add more admins: edit `addAdmin('someone@clustox.com')` and run it, **or** later add emails to the `Config` tab's `admins` row (comma-separated).
 3. In the app → **Employees**: add people. Email is an optional record field.
 4. **Reviewers**: assign employees to a reviewer by their Workspace email. The reviewer is **emailed automatically** when new employees are added to their list.
-5. **Designations & KPIs**: the 5 roles are pre-seeded; edit weights/KPIs here (weights must total 100%).
+5. **Designations & KPIs**: the 14 roles are pre-seeded; edit weights/KPIs here (weights must total 100%).
 6. Reviewers sign in → **My Evaluations** → rate → **Save Draft** or **Submit**. Drafts and submitted reviews both stay under **My Reviews** (resume drafts, view submitted).
 7. **Reports**: filter, view, export CSV.
 

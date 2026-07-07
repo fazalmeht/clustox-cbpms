@@ -241,6 +241,11 @@ function vReports(){
   var subs=(S.boot.reviews||[]).filter(function(r){return r.status==='submitted';});
   var html=head('Reports','Company-wide performance overview','<button class="btn sec" onclick="exportCSV()">⬇ Export CSV</button>');
   if(!subs.length)return html+empty('No evaluations yet','Submitted evaluations will appear here.');
+  // Pending edit requests awaiting admin decision
+  var pending=(S.boot.reviews||[]).filter(function(r){return r.editRequest&&r.editRequest.status==='pending';});
+  pending.forEach(function(r){
+    html+='<div class="card flex between wrap gap" style="background:#FFF7ED;border:1px solid var(--amber);margin-bottom:12px"><div><div style="font-weight:600;color:var(--amber)">⏳ Edit Request Pending</div><div class="muted" style="font-size:12px;margin-top:2px">'+esc(r.empName)+' · '+esc(r.cycle)+' — from '+esc(r.editRequest.requestedBy)+': “'+esc(r.editRequest.reason)+'”</div></div><div class="flex gap"><button class="btn sm" style="background:var(--green)" onclick="resolveEdit(\''+r.id+'\',\'approved\')">✅ Approve Edit</button><button class="btn sec sm" style="border-color:var(--red);color:var(--red)" onclick="resolveEdit(\''+r.id+'\',\'rejected\')">❌ Reject</button></div></div>';
+  });
   var cyc=uniq(subs.map(function(r){return r.cycle;})), dn=uniq(subs.map(function(r){return r.designationName;})), rcs=uniq(subs.map(function(r){return r.recommendation;}));
   var fil=subs.filter(function(r){return (rep.c==='all'||r.cycle===rep.c)&&(rep.d==='all'||r.designationName===rep.d)&&(rep.r==='all'||r.recommendation===rep.r);});
   fil.sort(function(a,b){return rep.sort==='name'?a.empName.localeCompare(b.empName):rep.sort==='score_d'?b.jobScore-a.jobScore:rep.sort==='score_a'?a.jobScore-b.jobScore:b.submittedAt-a.submittedAt;});
@@ -276,7 +281,56 @@ function showReviewDetail(r){
     '<div style="font-weight:600;margin-bottom:6px">KPI Ratings</div>'+kp+
     (r.mgrComments?'<div style="margin-top:12px"><div style="font-weight:600;margin-bottom:4px">Manager Comments</div><div class="muted">'+esc(r.mgrComments)+'</div></div>':'')+
     (r.promotion?'<div style="margin-top:10px"><b>Promotion readiness:</b> '+esc(r.promotion)+'</div>':''),
-    '<button class="btn sec" onclick="closeModal()">Close</button>');
+    '<button class="btn sec" onclick="printPdf(\''+r.id+'\')">🖨️ PDF Report</button> <button class="btn sec" onclick="closeModal()">Close</button>');
+}
+// Admin approve/reject an edit request.
+function resolveEdit(reviewId,decision){
+  toast('Saving…');
+  run('resolveEditRequest',reviewId,decision).then(function(){return refreshBoot();}).then(function(){
+    renderView();toast(decision==='approved'?'Edit approved — reviewer can now edit this review.':'Edit request rejected.');
+  }).catch(err);
+}
+// Open a print-ready PDF of a review in a new window.
+function printPdf(id){
+  var r=((S.boot.reviews||[]).concat(S.boot.myReviews||[])).filter(function(x){return x.id===id;})[0];
+  if(!r)return;
+  var d=desigById(r.designationId)||{kpis:[],behaviors:[]};var rc=getRec(r.jobScore,r.behaviorGate);
+  // Local hex palette — the print window has no access to the app's CSS variables.
+  var RLABELS=['','Unsatisfactory','Needs Improvement','Meets Expectations','Exceeds Expectations','Exceptional'];
+  var RCOLORS=['','#EF4444','#F59E0B','#F59E0B','#0EA5E9','#1DB954'];
+  var HEX={'var(--red)':'#EF4444','var(--redL)':'#FEF2F2','var(--amber)':'#F59E0B','var(--amberL)':'#FFFBEB','var(--green)':'#1DB954','var(--greenL)':'#E8F8EE','var(--teal)':'#0EA5E9','var(--tealL)':'#F0F9FF','var(--blue)':'#3B82F6','var(--blueL)':'#EFF6FF','var(--text4)':'#9CA3AF','var(--bg)':'#F5F7FA'};
+  var rcColor=HEX[rc.color]||rc.color, rcBg=HEX[rc.bg]||rc.bg;
+  function gL(g){return g==='meets'?'Meets Expectations':g==='watch'?'Improvement Required':g==='critical'?'Unsatisfactory':'—';}
+  var kpiRows=d.kpis.map(function(k,i){var rt=r.ratings[i]||0;var col=rt?RCOLORS[rt]:'#9CA3AF';return '<div class="kpi-row"><div style="flex:1"><div><span class="kpi-name">'+esc(k.name)+'</span><span class="kpi-weight">('+k.weight+'%)</span></div>'+(r.notes&&r.notes[i]?'<div class="evidence">'+esc(r.notes[i])+'</div>':'')+'</div><div style="display:flex;align-items:center;gap:10px;flex-shrink:0"><div class="bar-wrap"><div class="bar-fill" style="width:'+(rt/5*100)+'%;background:'+col+'"></div></div><span class="kpi-rating" style="color:'+col+';width:30px;text-align:right">'+(rt||'—')+'</span><span style="font-size:11px;color:'+col+';width:120px">'+(RLABELS[rt]||'')+'</span></div></div>';}).join('');
+  var behRows=d.behaviors.map(function(b,i){var v=(r.behaviors&&r.behaviors[i])||'';var gc=v==='meets'?'#1DB954':v==='watch'?'#F59E0B':v==='critical'?'#EF4444':'#9CA3AF';return '<div class="gate-row"><span style="font-weight:500">'+esc(b.name)+'</span><span class="gate-tag" style="background:'+gc+'18;color:'+gc+'">'+gL(v)+'</span></div>';}).join('');
+  var html='<!DOCTYPE html><html><head><title>'+esc(r.empName)+' — Performance Evaluation</title><style>'+
+    'body{font-family:Inter,system-ui,sans-serif;color:#111827;margin:0;padding:0;font-size:13px}'+
+    '.header{background:#0f2a1a;color:#fff;padding:24px 32px;display:flex;align-items:center;gap:16px}'+
+    '.hero{background:'+rcBg+';border-left:5px solid '+rcColor+';padding:20px 32px}'+
+    '.hero h2{font-size:22px;font-weight:700;color:#111827;margin:0 0 4px}.hero .rec{font-size:16px;font-weight:700;color:'+rcColor+';margin:0 0 8px}'+
+    '.section{padding:20px 32px;border-bottom:1px solid #E8ECF0}.section h3{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#6B7280;margin:0 0 14px}'+
+    '.grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px}.stat-box{background:#F5F7FA;border-radius:8px;padding:12px;text-align:center}'+
+    '.stat-box .label{font-size:10px;color:#9CA3AF;text-transform:uppercase;letter-spacing:.4px;font-weight:600}.stat-box .value{font-size:18px;font-weight:700;margin:4px 0 2px}'+
+    '.kpi-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #F3F4F6}.kpi-name{font-weight:500;color:#374151}.kpi-weight{font-size:11px;color:#9CA3AF;margin-left:6px}.kpi-rating{font-weight:700;font-size:14px}'+
+    '.bar-wrap{height:5px;background:#E8ECF0;border-radius:99px;overflow:hidden;width:120px}.bar-fill{height:100%;border-radius:99px}.evidence{font-size:11px;color:#9CA3AF;font-style:italic;margin-top:3px;padding-left:4px}'+
+    '.gate-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #F3F4F6}.gate-tag{padding:3px 10px;border-radius:6px;font-size:11px;font-weight:600}'+
+    '.comments{background:#F5F7FA;border-radius:8px;padding:14px;border-left:3px solid #1DB954;font-size:13px;color:#374151;line-height:1.7}.footer{text-align:center;padding:20px;color:#9CA3AF;font-size:11px;border-top:1px solid #E8ECF0}'+
+    '@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body>'+
+    '<div class="header"><div><div style="font-size:22px;font-weight:800;color:#1DB954">Clustox</div><div style="font-size:11px;opacity:.6">Competency Based Performance Management System</div></div><div style="flex:1;text-align:right"><div style="font-size:12px;opacity:.7">Confidential Performance Evaluation</div><div style="font-size:11px;opacity:.5">Generated: '+new Date().toLocaleDateString()+'</div></div></div>'+
+    '<div class="hero"><div class="rec">'+rc.icon+' '+esc(rc.label)+'</div><h2>'+esc(r.empName)+'</h2><p style="color:#6B7280;margin:4px 0">'+esc(r.designationName)+(r.department?' · '+esc(r.department):'')+(r.cycle?' · '+esc(r.cycle):'')+'</p></div>'+
+    '<div class="section"><h3>Evaluation Summary</h3><div class="grid">'+
+      '<div class="stat-box"><div class="label">Job Score</div><div class="value" style="color:'+(r.jobScore>=4.5?'#1DB954':r.jobScore>=3?'#3B82F6':'#EF4444')+'">'+r.jobScore.toFixed(2)+'</div><div style="font-size:11px;color:#9CA3AF">'+(RLABELS[Math.round(r.jobScore)]||'')+'</div></div>'+
+      '<div class="stat-box"><div class="label">Professional Standard</div><div class="value" style="color:'+(r.behaviorGate==='meets'?'#1DB954':r.behaviorGate==='watch'?'#F59E0B':'#EF4444')+';font-size:13px">'+gL(r.behaviorGate)+'</div></div>'+
+      '<div class="stat-box"><div class="label">Reviewed By</div><div class="value" style="font-size:13px">'+esc(r.reviewerName||r.reviewerEmail||'')+'</div><div style="font-size:11px;color:#9CA3AF">'+(r.submittedAt?new Date(r.submittedAt).toLocaleDateString():'')+'</div></div></div>'+
+      (r.promotion?'<div style="font-size:13px;color:#374151"><b>Promotion Readiness:</b> '+esc(r.promotion)+'</div>':'')+'</div>'+
+    (d.kpis.length?'<div class="section"><h3>Job KPI Breakdown</h3>'+kpiRows+'</div>':'')+
+    (d.behaviors.length?'<div class="section"><h3>Professional Standards</h3>'+behRows+'</div>':'')+
+    (r.mgrComments?'<div class="section"><h3>Manager Comments</h3><div class="comments">'+esc(r.mgrComments)+'</div></div>':'')+
+    '<div class="footer">This is a confidential Clustox performance evaluation document. For internal use only.</div></body></html>';
+  var w=window.open('','_blank');
+  if(!w){toast('Pop-up blocked — allow pop-ups to print the report.','error');return;}
+  w.document.write(html);w.document.close();
+  setTimeout(function(){w.print();},500);
 }
 function exportCSV(){
   var subs=(S.boot.reviews||[]).filter(function(r){return r.status==='submitted';});
@@ -334,7 +388,9 @@ function evalStep1(){
   html+='<div class="card" style="margin-bottom:14px"><div style="font-weight:600;margin-bottom:16px">📊 Job KPIs — rate 1 (low) to 5 (high)</div>';
   dsg.kpis.forEach(function(k,i){var r=w.rat[i]||0;
     html+='<div class="kpi-row"><div class="flex between wrap gap"><div style="flex:1;min-width:200px"><div class="flex gap wrap"><b style="font-weight:600">'+esc(k.name)+'</b><span class="tag" style="background:var(--blueL);color:var(--blue)">'+k.weight+'%</span></div><div class="muted" style="font-size:12px;margin:4px 0">'+esc(k.desc||'')+'</div>'+(k.question?'<div class="muted" style="font-size:12px;font-style:italic">› '+esc(k.question)+'</div>':'')+'</div><div style="text-align:right"><div class="flex gap" style="justify-content:flex-end">'+[1,2,3,4,5].map(function(v){return '<button class="rate" style="'+(r===v?'border-color:'+RCOLORS[v]+';color:'+RCOLORS[v]+';background:color-mix(in srgb,'+RCOLORS[v]+' 12%,#fff)':'')+'" onclick="setRat('+i+','+v+')">'+v+'</button>';}).join('')+'</div><div style="font-size:11px;font-weight:600;margin-top:4px;color:'+(r?RCOLORS[r]:'var(--text4)')+'">'+(RLABELS[r]||'Not rated')+'</div></div></div>'+
-      '<textarea placeholder="Evidence / notes for this KPI…" rows="2" style="margin-top:8px;font-size:12px" oninput="S.wiz.nt['+i+']=this.value">'+esc(w.nt[i]||'')+'</textarea></div>';
+      '<div style="margin-top:10px"><label style="font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:4px">Evidence <span class="req">*</span>'+(k.evidence?'<span style="font-weight:400;color:var(--text4);margin-left:6px">Suggested: '+esc(k.evidence)+'</span>':'')+'</label>'+
+      '<textarea placeholder="'+esc(k.evidence||'Provide specific evidence for this rating…')+'" rows="2" style="font-size:12px;width:100%;border:1.5px solid '+((!w.nt[i]||!String(w.nt[i]).trim())?'var(--amber)':'var(--green)')+'" oninput="S.wiz.nt['+i+']=this.value">'+esc(w.nt[i]||'')+'</textarea>'+
+      ((!w.nt[i]||!String(w.nt[i]).trim())?'<div style="font-size:11px;color:var(--amber);margin-top:2px">⚠ Required — must provide evidence before submitting</div>':'')+'</div></div>';
   });
   html+='</div>';
   // behaviors
@@ -355,6 +411,13 @@ function setRat(i,v){S.wiz.rat[i]=v;renderView();}
 function setBeh(i,v){S.wiz.beh[i]=v;renderView();}
 function evalSubmit(status){
   var w=S.wiz;var emp=S.boot.myEmployees.filter(function(e){return e.id===w.empId;})[0];
+  if(status==='submitted'){
+    var dsg=desigById(emp.designationId)||{kpis:[]};
+    var rated=dsg.kpis.filter(function(_,i){return Number(w.rat[i])>0;}).length;
+    if(rated<dsg.kpis.length)return toast('Please rate all '+dsg.kpis.length+' KPIs.','error');
+    var missing=dsg.kpis.filter(function(_,i){return !w.nt[i]||!String(w.nt[i]).trim();}).length;
+    if(missing>0)return toast('Evidence is required for all KPIs — '+missing+' still missing.','error');
+  }
   var p={empId:w.empId,cycle:w.cyc,status:status,reviewerName:S.boot.user.email,ratings:w.rat,notes:w.nt,behaviors:w.beh,behaviorNotes:w.bn,mgrComments:w.com,promotion:w.pro};
   toast(status==='draft'?'Saving draft…':'Submitting…');
   run('saveReview',p).then(function(){return refreshBoot();}).then(function(){
@@ -375,9 +438,21 @@ function vDone(){
     var isDraft=r.status!=='submitted';
     var meta=esc(r.designationName)+' · '+esc(r.cycle)+(r.submittedAt?' · '+new Date(r.submittedAt).toLocaleDateString():'');
     var badge=isDraft?'<span class="tag" style="background:var(--amberL);color:var(--amber)">Draft</span>':'<span class="tag" style="background:'+rc.bg+';color:'+rc.color+'">'+rc.icon+' '+esc(rc.label)+'</span>';
+    var er=r.editRequest;
+    var editCtrl='';
+    if(!isDraft){
+      if(!er||er.status==='rejected'){
+        editCtrl='<button class="btn sec sm" style="border-color:var(--amber);color:var(--amber)" onclick="requestEdit(\''+r.id+'\',\''+esc(r.empName)+'\',\''+esc(r.cycle)+'\')">✏️ Request Edit</button>';
+        if(er&&er.status==='rejected')editCtrl='<span class="tag" style="background:var(--redL);color:var(--red)">Edit rejected</span>'+editCtrl;
+      }else if(er.status==='pending'){
+        editCtrl='<span class="tag" style="background:var(--amberL);color:var(--amber)">⏳ Edit Pending Approval</span>';
+      }else if(er.status==='approved'){
+        editCtrl='<button class="btn sm" style="background:var(--green)" onclick="editApprovedReview(\''+r.empId+'\',\''+esc(r.cycle)+'\')">✅ Edit Approved — Edit</button>';
+      }
+    }
     var act=isDraft
       ? '<button class="btn sm" onclick="openReview(\''+r.empId+'\',\''+esc(r.cycle)+'\')">Resume</button>'
-      : '<span style="font-weight:700;color:'+rc.color+'">'+r.jobScore.toFixed(1)+'</span><button class="btn sec sm" onclick="openReview(\''+r.empId+'\',\''+esc(r.cycle)+'\')">View</button>';
+      : '<span style="font-weight:700;color:'+rc.color+'">'+r.jobScore.toFixed(1)+'</span><button class="btn sec sm" onclick="openReview(\''+r.empId+'\',\''+esc(r.cycle)+'\')">View</button>'+editCtrl;
     return '<div class="card flex between wrap gap"><div class="flex gap">'+avatar(r.empName,38)+'<div><div style="font-weight:600">'+esc(r.empName)+'</div><div class="muted" style="font-size:12px">'+meta+'</div></div></div><div class="flex gap">'+badge+act+'</div></div>';
   }
   if(drafts.length){html+='<div style="font-weight:600;font-size:13px;color:var(--text3);margin:4px 0 8px">In progress</div><div class="stack">'+drafts.map(row).join('')+'</div>';}
@@ -390,6 +465,21 @@ function openReview(empId,cyc){
   if(!r)return;
   if(r.status==='submitted'){ showReviewDetail(r); return; }
   // resume draft in the evaluation wizard
+  if(!(S.boot.myEmployees||[]).some(function(e){return e.id===empId;})){toast('This employee is no longer assigned to you.','error');return;}
+  S.tab='eval';
+  S.wiz={step:1,empId:empId,cyc:cyc,rat:{},nt:{},beh:{},bn:{},com:'',pro:'',done:false};
+  loadDraft();
+  renderShell();
+}
+// Reviewer requests admin permission to edit a submitted review.
+function requestEdit(reviewId,empName,cyc){
+  var reason=window.prompt('Request edit for '+empName+'’s review ('+cyc+'):\n\nProvide a reason for the edit request:');
+  if(!reason||!reason.trim())return;
+  toast('Sending edit request…');
+  run('requestReviewEdit',reviewId,reason.trim()).then(function(){return refreshBoot();}).then(function(){renderView();toast('Edit request sent to Admin.');}).catch(err);
+}
+// Edit-approved: jump straight into the wizard pre-loaded with the submitted review.
+function editApprovedReview(empId,cyc){
   if(!(S.boot.myEmployees||[]).some(function(e){return e.id===empId;})){toast('This employee is no longer assigned to you.','error');return;}
   S.tab='eval';
   S.wiz={step:1,empId:empId,cyc:cyc,rat:{},nt:{},beh:{},bn:{},com:'',pro:'',done:false};

@@ -17,7 +17,7 @@ var TABS = {
 };
 var REVIEW_COLS = ['id','empId','empName','empEmail','designationId','designationName','department','project',
   'reviewerEmail','reviewerName','cycle','status','ratings','notes','behaviors','behaviorNotes',
-  'jobScore','behaviorGate','recommendation','mgrComments','promotion','submittedAt','updatedAt'];
+  'jobScore','behaviorGate','recommendation','mgrComments','promotion','submittedAt','updatedAt','editRequest'];
 
 var CYCLES = ['Q1 2025','Q2 2025','Q3 2025','Q4 2025','H1 2025','H2 2025','Annual 2025',
   'Q1 2026','Q2 2026','H1 2026','Annual 2026'];
@@ -134,7 +134,8 @@ function reviewRowToObj_(r) {
     ratings: parse(r.ratings), notes: parse(r.notes), behaviors: parse(r.behaviors), behaviorNotes: parse(r.behaviorNotes),
     jobScore: Number(r.jobScore) || 0, behaviorGate: r.behaviorGate, recommendation: r.recommendation,
     mgrComments: r.mgrComments, promotion: r.promotion,
-    submittedAt: Number(r.submittedAt) || 0, updatedAt: Number(r.updatedAt) || 0
+    submittedAt: Number(r.submittedAt) || 0, updatedAt: Number(r.updatedAt) || 0,
+    editRequest: (function () { try { return r.editRequest ? JSON.parse(r.editRequest) : null; } catch (e) { return null; } })()
   };
 }
 
@@ -193,6 +194,9 @@ function saveReview(payload) {
   if (status === 'submitted') {
     var rated = desig.kpis.filter(function (_, i) { return Number(payload.ratings[i]) > 0; }).length;
     if (rated < desig.kpis.length) throw new Error('Rate all ' + desig.kpis.length + ' KPIs before submitting.');
+    var notes = payload.notes || {};
+    var missingEvidence = desig.kpis.filter(function (_, i) { return !notes[i] || !String(notes[i]).trim(); }).length;
+    if (missingEvidence > 0) throw new Error('Evidence is required for all KPIs — ' + missingEvidence + ' still missing.');
   }
 
   // Recompute score/gate/recommendation server-side — never trust the client.
@@ -219,7 +223,9 @@ function saveReview(payload) {
     jobScore: score.toFixed(4), behaviorGate: gate, recommendation: rec,
     mgrComments: payload.mgrComments || '', promotion: payload.promotion || '',
     submittedAt: status === 'submitted' ? now : (existing ? existing.submittedAt : ''),
-    updatedAt: now
+    updatedAt: now,
+    // Submitting clears any pending/approved edit request; a draft keeps whatever was there.
+    editRequest: status === 'submitted' ? '' : (existing && existing.editRequest ? JSON.stringify(existing.editRequest) : '')
   };
 
   // upsert by id
@@ -230,6 +236,43 @@ function saveReview(payload) {
   else { appendRow_(TABS.REVIEWS, rec_obj, REVIEW_COLS); }
 
   return { ok: true, jobScore: score, behaviorGate: gate, recommendation: rec, status: status };
+}
+
+/** Reviewer asks admin for permission to edit an already-submitted review. */
+function requestReviewEdit(reviewId, reason) {
+  var email = currentEmail_();
+  if (!reason || !String(reason).trim()) throw new Error('A reason for the edit request is required.');
+  var raw = readTab_(TABS.REVIEWS);
+  var idx = -1;
+  for (var i = 0; i < raw.length; i++) if (raw[i].id === reviewId) { idx = i; break; }
+  if (idx < 0) throw new Error('Review not found.');
+  if (!isAdmin_() && String(raw[idx].reviewerEmail).toLowerCase() !== email) {
+    throw new Error('You can only request edits on your own reviews.');
+  }
+  raw[idx].editRequest = JSON.stringify({
+    requestedBy: email, reason: String(reason).trim(), requestedAt: Date.now(), status: 'pending'
+  });
+  writeTab_(TABS.REVIEWS, raw, REVIEW_COLS);
+  return { ok: true };
+}
+
+/** Admin approves or rejects a pending edit request. decision = 'approved' | 'rejected'. */
+function resolveEditRequest(reviewId, decision) {
+  requireAdmin_();
+  if (decision !== 'approved' && decision !== 'rejected') throw new Error('Invalid decision.');
+  var raw = readTab_(TABS.REVIEWS);
+  var idx = -1;
+  for (var i = 0; i < raw.length; i++) if (raw[i].id === reviewId) { idx = i; break; }
+  if (idx < 0) throw new Error('Review not found.');
+  var er;
+  try { er = raw[idx].editRequest ? JSON.parse(raw[idx].editRequest) : null; } catch (e) { er = null; }
+  if (!er) throw new Error('No edit request on this review.');
+  er.status = decision;
+  er.resolvedBy = currentEmail_();
+  er.resolvedAt = Date.now();
+  raw[idx].editRequest = JSON.stringify(er);
+  writeTab_(TABS.REVIEWS, raw, REVIEW_COLS);
+  return { ok: true, status: decision };
 }
 
 // ── Admin: employees ──
