@@ -34,10 +34,13 @@ var S={boot:null,tab:null,wiz:null,modal:null};
 function desigById(id){return (S.boot.designations||[]).filter(function(d){return d.id===id;})[0];}
 
 // ─── boot ─────────────────────────────────────────────────────────────────────
+function getViewParam(){return new Promise(function(res){try{google.script.url.getLocation(function(loc){res((loc&&loc.parameter&&loc.parameter.view)||'');});}catch(e){res('');}});}
 window.addEventListener('DOMContentLoaded',function(){
-  run('getBootstrap').then(function(b){
+  Promise.all([run('getBootstrap'),getViewParam()]).then(function(r){
+    var b=r[0],view=r[1];
     S.boot=b;
     S.tab=b.isAdmin?'dash':(b.myEmployees.length||((b.myReviews||[]).length)?'eval':'none');
+    if(view==='eval'&&b.myEmployees.length)S.tab='eval';
     renderShell();
   }).catch(function(e){
     $('#root').className='center';
@@ -47,7 +50,7 @@ window.addEventListener('DOMContentLoaded',function(){
 
 // ─── shell + nav ──────────────────────────────────────────────────────────────
 function navFor(){
-  if(S.boot.isAdmin)return[['dash','Dashboard'],['emps','Employees'],['rvrs','Reviewers'],['desigs','Designations & KPIs'],['reports','Reports']];
+  if(S.boot.isAdmin){var a=[['dash','Dashboard'],['emps','Employees'],['rvrs','Reviewers'],['desigs','Designations & KPIs'],['reports','Reports']];if(S.boot.myEmployees.length)a.push(['eval','My Evaluations']);if((S.boot.myReviews||[]).length||S.boot.myEmployees.length)a.push(['done','My Reviews']);return a;}
   var n=[];
   if(S.boot.myEmployees.length)n.push(['eval','My Evaluations']);
   if((S.boot.myReviews||[]).length||S.boot.myEmployees.length)n.push(['done','My Reviews']);
@@ -121,17 +124,17 @@ var empSearch='';
 function vEmps(){
   var b=S.boot, emps=b.employees||[];
   var q=empSearch.toLowerCase();
-  var filt=emps.filter(function(e){var dn=(desigById(e.designationId)||{}).name||'';return (e.name||'').toLowerCase().indexOf(q)>=0||dn.toLowerCase().indexOf(q)>=0||(e.department||'').toLowerCase().indexOf(q)>=0;});
+  var filt=emps.filter(function(e){var dn=(desigById(e.designationId)||{}).name||'';return (e.empCode||'').toLowerCase().indexOf(q)>=0||(e.name||'').toLowerCase().indexOf(q)>=0||dn.toLowerCase().indexOf(q)>=0||(e.department||'').toLowerCase().indexOf(q)>=0;});
   var html=head('Employees',emps.length+' employees','<button class="btn" onclick="empModal()">＋ Add Employee</button>');
-  html+='<div class="card" style="margin-bottom:16px;padding:14px"><input placeholder="Search by name, designation, department…" value="'+esc(empSearch)+'" oninput="empSearch=this.value;rerenderEmps()"></div>';
+  html+='<div class="card" style="margin-bottom:16px;padding:14px"><input placeholder="Search by ID, name, designation, department…" value="'+esc(empSearch)+'" oninput="empSearch=this.value;rerenderEmps()"></div>';
   if(!filt.length)return html+empty('No employees found',empSearch?'No matches.':'Add your first employee.');
-  html+='<table class="tbl"><thead><tr><th>Name</th><th>Designation</th><th>Department</th><th>Status</th><th></th></tr></thead><tbody>';
+  html+='<table class="tbl"><thead><tr><th>Employee ID</th><th>Name</th><th>Designation</th><th>Department</th><th>Status</th><th></th></tr></thead><tbody>';
   filt.forEach(function(e){
     var dn=(desigById(e.designationId)||{}).name||'—';
     var done=(b.reviews||[]).some(function(r){return r.empId===e.id&&r.status==='submitted';});
     var asgd=(b.assignments||[]).some(function(a){return a.employeeId===e.id;});
     var st=done?['Evaluated','var(--green)','var(--greenL)']:asgd?['Assigned','var(--blue)','var(--blueL)']:['Unassigned','var(--text4)','var(--bg)'];
-    html+='<tr><td><div class="flex gap">'+avatar(e.name,32)+'<div><div style="font-weight:600">'+esc(e.name)+'</div>'+(e.email?'<div class="muted" style="font-size:11px">'+esc(e.email)+'</div>':'')+'</div></div></td><td>'+esc(dn)+'</td><td>'+esc(e.department||'—')+'</td><td><span class="pill" style="background:'+st[2]+';color:'+st[1]+'">'+st[0]+'</span></td><td style="text-align:right;white-space:nowrap"><button class="btn sec sm" onclick="empModal(\''+e.id+'\')">Edit</button> <button class="btn danger sm" onclick="empDelete(\''+e.id+'\')">Delete</button></td></tr>';
+    html+='<tr><td style="font-family:monospace;font-size:12px;font-weight:600">'+esc(e.empCode||'—')+'</td><td><div class="flex gap">'+avatar(e.name,32)+'<div><div style="font-weight:600">'+esc(e.name)+'</div>'+(e.email?'<div class="muted" style="font-size:11px">'+esc(e.email)+'</div>':'')+'</div></div></td><td>'+esc(dn)+'</td><td>'+esc(e.department||'—')+'</td><td><span class="pill" style="background:'+st[2]+';color:'+st[1]+'">'+st[0]+'</span></td><td style="text-align:right;white-space:nowrap"><button class="btn sec sm" onclick="empModal(\''+e.id+'\')">Edit</button> <button class="btn danger sm" onclick="empDelete(\''+e.id+'\')">Delete</button></td></tr>';
   });
   return html+'</tbody></table>';
 }
@@ -142,6 +145,7 @@ function empModal(id){
   var d=S.modal.data;
   var opts=(S.boot.designations||[]).map(function(x){return '<option value="'+x.id+'"'+(d.designationId===x.id?' selected':'')+'>'+esc(x.name)+'</option>';}).join('');
   showModal(id?'Edit Employee':'Add Employee',
+    fld('Employee ID',true,'<input id="m_empcode" value="'+esc(d.empCode||'')+'" placeholder="e.g. CLX-001">')+
     fld('Name',true,'<input id="m_name" value="'+esc(d.name||'')+'">')+
     fld('Email (optional record)',false,'<input id="m_email" value="'+esc(d.email||'')+'" placeholder="name@clustox.com">')+
     '<div class="grid2">'+fld('Designation',true,'<select id="m_desig"><option value="">— Select —</option>'+opts+'</select>')+fld('Department',false,'<input id="m_dept" value="'+esc(d.department||'')+'">')+'</div>'+
@@ -150,7 +154,8 @@ function empModal(id){
     '<button class="btn" onclick="empSave(\''+(id||'')+'\')">Save</button>');
 }
 function empSave(id){
-  var p={id:id||'',name:val('m_name'),email:val('m_email').trim().toLowerCase(),designationId:val('m_desig'),department:val('m_dept'),manager:val('m_mgr'),project:val('m_proj'),empType:val('m_type')};
+  var p={id:id||'',empCode:val('m_empcode').trim(),name:val('m_name'),email:val('m_email').trim().toLowerCase(),designationId:val('m_desig'),department:val('m_dept'),manager:val('m_mgr'),project:val('m_proj'),empType:val('m_type')};
+  if(!p.empCode)return toast('Employee ID is required.','error');
   if(!p.name)return toast('Name is required.','error');
   if(!p.designationId)return toast('Designation is required.','error');
   busyModal();

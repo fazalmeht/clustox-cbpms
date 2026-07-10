@@ -280,7 +280,14 @@ function saveEmployee(emp) {
   requireAdmin_();
   if (!emp.name) throw new Error('Name is required.');
   if (!emp.designationId) throw new Error('Designation is required.');
+  emp.empCode = String(emp.empCode == null ? '' : emp.empCode).trim();
+  if (!emp.empCode) throw new Error('Employee ID is required.');
   var rows = readTab_(TABS.EMPLOYEES);
+  var dupe = rows.some(function (e) {
+    return e.id !== emp.id &&
+      String(e.empCode || '').trim().toLowerCase() === emp.empCode.toLowerCase();
+  });
+  if (dupe) throw new Error('Employee ID "' + emp.empCode + '" is already in use.');
   if (emp.id) {
     var found = false;
     rows = rows.map(function (e) { if (e.id === emp.id) { found = true; return Object.assign(e, emp); } return e; });
@@ -290,13 +297,13 @@ function saveEmployee(emp) {
     emp.addedAt = Date.now();
     rows.push(emp);
   }
-  var cols = ['id','name','email','designationId','department','manager','project','empType','addedAt'];
+  var cols = ['id','name','email','designationId','department','manager','project','empType','addedAt','empCode'];
   writeTab_(TABS.EMPLOYEES, rows, cols);
   return { ok: true, id: emp.id };
 }
 function deleteEmployee(id) {
   requireAdmin_();
-  var cols = ['id','name','email','designationId','department','manager','project','empType','addedAt'];
+  var cols = ['id','name','email','designationId','department','manager','project','empType','addedAt','empCode'];
   writeTab_(TABS.EMPLOYEES, readTab_(TABS.EMPLOYEES).filter(function (e) { return e.id !== id; }), cols);
   writeTab_(TABS.ASSIGNMENTS, readTab_(TABS.ASSIGNMENTS).filter(function (a) { return a.employeeId !== id; }), ['reviewerEmail','employeeId']);
   return { ok: true };
@@ -337,7 +344,10 @@ function notifyReviewer_(reviewerEmail, employeeIds, newCount) {
   }).filter(String);
 
   var url = '';
-  try { url = ScriptApp.getService().getUrl(); } catch (e) {}
+  try {
+    url = ScriptApp.getService().getUrl();
+    if (url) url += (url.indexOf('?') >= 0 ? '&' : '?') + 'view=eval';
+  } catch (e) {}
 
   var subject = 'Clustox CBPMS — employees assigned for your review';
   var body = 'Hello,\n\n' +

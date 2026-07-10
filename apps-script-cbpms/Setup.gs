@@ -21,7 +21,7 @@ function setup() {
   headers[TABS.DESIGNATIONS] = ['id','name','identity'];
   headers[TABS.KPIS]         = ['designationId','kpiId','name','weight','desc','question','evidence'];
   headers[TABS.BEHAVIORS]    = ['designationId','behaviorId','name','desc','question'];
-  headers[TABS.EMPLOYEES]    = ['id','name','email','designationId','department','manager','project','empType','addedAt'];
+  headers[TABS.EMPLOYEES]    = ['id','name','email','designationId','department','manager','project','empType','addedAt','empCode'];
   headers[TABS.ASSIGNMENTS]  = ['reviewerEmail','employeeId'];
   headers[TABS.REVIEWS]      = REVIEW_COLS;
 
@@ -31,6 +31,16 @@ function setup() {
     if (sh.getLastRow() === 0) {
       sh.getRange(1, 1, 1, headers[name].length).setValues([headers[name]]).setFontWeight('bold');
       sh.setFrozenRows(1);
+    } else {
+      // Migrate an existing sheet: append any header columns it is missing
+      // (added as the LAST columns so existing data stays aligned).
+      var existing = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+      headers[name].forEach(function (h) {
+        if (existing.indexOf(h) < 0) {
+          sh.getRange(1, sh.getLastColumn() + 1).setValue(h).setFontWeight('bold');
+          existing.push(h);
+        }
+      });
     }
   });
 

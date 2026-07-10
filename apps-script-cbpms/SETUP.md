@@ -49,13 +49,17 @@ After the first `setup()` run, set the deployment to **Execute as: Me** and **Ac
 
 1. Run `setup()` — you become admin automatically.
 2. Add more admins: edit `addAdmin('someone@clustox.com')` and run it, **or** later add emails to the `Config` tab's `admins` row (comma-separated).
-3. In the app → **Employees**: add people. Email is an optional record field.
+3. In the app → **Employees**: add people. **Employee ID** is required and must be unique; Email is an optional record field.
 4. **Reviewers**: assign employees to a reviewer by their Workspace email. The reviewer is **emailed automatically** when new employees are added to their list.
 5. **Designations & KPIs**: the 14 roles are pre-seeded; edit weights/KPIs here (weights must total 100%).
 6. Reviewers sign in → **My Evaluations** → rate → **Save Draft** or **Submit**. Drafts and submitted reviews both stay under **My Reviews** (resume drafts, view submitted).
 7. **Reports**: filter, view, export CSV.
 
 > **Note:** Employees do **not** have access to view their own results — the app is for admins and reviewers only.
+
+> **Upgrading an existing deployment?** After pulling this update, run `setup()` once from the editor. It is safe to re-run: it leaves your data untouched and only adds the new `empCode` (Employee ID) column to the existing `Employees` tab.
+
+> **Admins can review too.** If an admin is assigned employees (via **Reviewers & Assignments**), they now see **My Evaluations** / **My Reviews** in their own nav, and the assignment email links straight into the review view.
 
 ## Security model
 
